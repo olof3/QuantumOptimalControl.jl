@@ -29,10 +29,9 @@ xip = 0 # 2nd order dispersive shift correcion (not used)
 wt = 0  # interaction picture
 wc = 0 # interaction picture
 
-max_rabi_rate = 2π* 40e6
-cutoff_frequency = 2π* 50e6
-#gate_duration = 0.5e-6 #s
-num_drives = 1
+#max_rabi_rate = 2π* 40e6
+#cutoff_frequency = 2π* 50e6
+tgate = 550e-9 #s
 
 
 # Setup Hamiltonian
@@ -45,9 +44,27 @@ Htrans = wt*kron(b'*b, I(N_cavity)) + alpha/2*kron(b' * b' * b * b, I(N_cavity))
 Hint = xi*kron(b'*b, a'*a) + xip/2*kron(b'*b, a'*a'*a*a)
 H0 = Hosc + Htrans + Hint
 
-T_control = kron(b', I(N_cavity))
+Hc = kron(b', I(N_cavity))
 
 
+
+# Setup initial state
+c0_cavity =  normalize!(ones(N_cavity))
+c0_qubit = [1; zeros(N_qubit-1)]
+c0 = kron(c0_qubit, c0_cavity)
+
+# setup for optimization target
+# target operation for the cavity only
+cav_target_operation = exp(diagm(1im*theta))
+
+# target operatrion for the full system
+full_target_operation = kron(I(N_qubit), cav_target_operation)
+# work in the subspace of |0> qubit state 
+cavity_subspace_projector = diagm(kron([1.,0.], ones(N_cavity)))
+# net system target
+subspace_target = full_target_operation * cavity_subspace_projector
+
+##
 
 
 Ntot = size(H0,1)
@@ -84,19 +101,41 @@ function update_u!(integrator)
 end
 
 
-# Setup initial state
-c0_cavity =  normalize!(ones(N_cavity))
-c0_qubit = [1; zeros(N_qubit-1)]
-c0 = kron(c0_qubit, c0_cavity)
-
 
 pcb=PeriodicCallback(update_u!, 1.0e-9, initial_affect=true, save_positions=(true,false))
 
-prob = ODEProblem{true}(wrap_f(dxdt), complex2real(c0), (0.0, 550e-9), callback=pcb)
+prob = ODEProblem{true}(wrap_f(dxdt), complex2real(c0), (0.0, tgate), callback=pcb)
 
-sol = solve(prob, Tsit5(), p=([0.0; 0.0], u_ctrl), saveat=0:1e-9:550e-9, adaptive=false, dt=1e-10)
+sol = solve(prob, Tsit5(), p=([0.0; 0.0], u_ctrl), saveat=0:1e-9:tgate, adaptive=false, dt=1e-10)
 
 t = sol.t
 x = transpose(hcat([real2complex(u) for u in sol.u]...))
 
-plot(sol.t, abs2.(x[:,1:11]))
+plt1 = plot(sol.t, abs2.(x[:,1:11]))
+
+
+
+# Usin very simple propagation
+
+function prop_pwc(H0, Hc, u_ctrl, x0)
+    x = Vector{typeof(x0)}(undef, length(u_ctrl)+1)
+    x[1] = copy(x0)
+
+    for k=1:length(u_ctrl)
+        Ω = u_ctrl[k]
+        x[k+1] = exp(-1e-9*im*(H0 + Ω*Hc + conj(Ω)*Hc')) * x[k]
+    end
+    return x
+end
+
+@time x = prop_pwc(H0, Hc/2, u_ctrl, complex(c0))
+
+x = prop_pwc(H0, Hc/2, u_ctrl, complex(c0))
+
+x2 = hcat(x...) 
+
+plt2 = plot( abs2.(x2[1:11,:])')
+
+
+plot(plt1, plt2)
+

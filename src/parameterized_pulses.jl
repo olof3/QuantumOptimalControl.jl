@@ -15,12 +15,12 @@ end
 function u_sinebasis(p, t)#::Tuple{Float64,Float64}
     Tgate = p[1]
     num_controls = length(p) ÷ 2
-    Ax = Ay = zero(eltype(p))
+    Ωx = Ωy = zero(eltype(p))
     for k=1:num_controls
         bkt = sinpi(k*t/Tgate)
-        Ax += p[2k]*bkt
-        Ay += p[2k+1]*bkt
+        Ωx += p[2k]*bkt
+        Ωy += p[2k+1]*bkt
     end
-    return Complex(Ax, Ay)
+    return Complex(Ωx, Ωy)
 end
 
