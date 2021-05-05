@@ -15,7 +15,7 @@ N_cavity = 12 # nuber of cavity levels
 
 examples_dir = dirname(Base.find_package("QuantumOptimalControl"))
 iq_data = DelimitedFiles.readdlm(joinpath(examples_dir, "../examples/cavity_qubit_control.csv"))
-u_ctrl = [Complex(r...) for r in eachrow(iq_data)]
+u_ctrl = 1e-9 * [Complex(r...) for r in eachrow(iq_data)] # Going over to GHz
 
 # System parameters
 theta= [ 3.6348672 ,  1.1435776 ,  0.        ,  1.7441809 , -0.4598031 ,
@@ -44,7 +44,7 @@ Htrans = wt*kron(b'*b, I(N_cavity)) + alpha/2*kron(b' * b' * b * b, I(N_cavity))
 Hint = xi*kron(b'*b, a'*a) + xip/2*kron(b'*b, a'*a'*a*a)
 H0 = Hosc + Htrans + Hint
 
-Hc = kron(b', I(N_cavity))
+Tc = kron(b', I(N_cavity))
 
 
 
@@ -66,7 +66,6 @@ subspace_target = full_target_operation * cavity_subspace_projector
 
 ##
 
-
 Ntot = size(H0,1)
 @parameters t uᵣ uᵢ
 @variables cᵣ[1:Ntot](t) cᵢ[1:Ntot](t)
@@ -74,19 +73,28 @@ D = Differential(t)
 c = cᵣ + im*cᵢ
 u = uᵣ + im*uᵢ
 
-Htot = sparse(H0 + u*Hc/2 + conj(u)*Hc'/2)
+@parameters λᵣ λᵢ
+λ = λᵣ + im*λᵢ
 
-symrhs = -1im * (Htot * c)
-symrhs = simplify.(symrhs)
-symlhs = D.(c)
+Htot = sparse(H0 * 1e-9 + u*Tc/2 + conj(u)*Tc'/2)
 
-eqs = symlhs .~ symrhs
-
+f = simplify.(-1im * (Htot * c))
+eqs = D.(c) .~ simplify.(-1im * (Htot * c))
 eqs_vec = vcat(eqs...) # Since complex-valued equations become a Vector of two equations
 sys = ODESystem(eqs_vec, t, complex2real(c[:]), complex2real([u]))
-
 dxdt = generate_function(sys; expression=Val{false})[2]
 
+eqs = D.(c) .~ simplify.(-1im * (Htot' * c))
+eqs_vec = vcat(eqs...) # Since complex-valued equations become a Vector of two equations
+sys = ODESystem(eqs_vec, t, complex2real(c[:]), complex2real([u]))
+dλdt = generate_function(sys; expression=Val{false})[2]
+
+f_u = λ * Symbolics.jacobian(complex2real(f), complex2real([u]))
+
+
+
+
+##
 
 function wrap_f(f)
     function(dx, x, p, t)        
@@ -94,19 +102,23 @@ function wrap_f(f)
     end
 end
 
+
+Δt = 1.0 # 1e-9
+tgate = 550 * Δt
+
 function update_u!(integrator)
-    k = Int(round(integrator.t/1e-9))
+    k = Int(round(integrator.t/Δt))
     integrator.p[1][1] = real(integrator.p[2][k+1])
     integrator.p[1][2] = imag(integrator.p[2][k+1])    
 end
 
 
 
-pcb=PeriodicCallback(update_u!, 1.0e-9, initial_affect=true, save_positions=(true,false))
+pcb=PeriodicCallback(update_u!, Δt, initial_affect=true, save_positions=(true,false))
 
 prob = ODEProblem{true}(wrap_f(dxdt), complex2real(c0), (0.0, tgate), callback=pcb)
 
-sol = solve(prob, Tsit5(), p=([0.0; 0.0], u_ctrl), saveat=0:1e-9:tgate, adaptive=false, dt=1e-10)
+sol = solve(prob, Tsit5(), p=([0.0; 0.0], u_ctrl), saveat=0:Δt:tgate, adaptive=false, dt=0.1Δt)
 
 t = sol.t
 x = transpose(hcat([real2complex(u) for u in sol.u]...))
@@ -114,23 +126,26 @@ x = transpose(hcat([real2complex(u) for u in sol.u]...))
 plt1 = plot(sol.t, abs2.(x[:,1:11]))
 
 
+abs(real2complex(sol.u[end])' * normalize!(diag(subspace_target)))
 
-# Usin very simple propagation
+##
 
-function prop_pwc(H0, Hc, u_ctrl, x0)
+# Using very simple propagation
+
+function prop_pwc(H0, Tc, u_ctrl, x0)
     x = Vector{typeof(x0)}(undef, length(u_ctrl)+1)
     x[1] = copy(x0)
 
     for k=1:length(u_ctrl)
         Ω = u_ctrl[k]
-        x[k+1] = exp(-1e-9*im*(H0 + Ω*Hc + conj(Ω)*Hc')) * x[k]
+        x[k+1] = exp(-1e-9*im*(H0 + Ω*Tc + conj(Ω)*Tc')) * x[k]
     end
     return x
 end
 
-@time x = prop_pwc(H0, Hc/2, u_ctrl, complex(c0))
+@time x = prop_pwc(H0, Tc/2, u_ctrl, complex(c0))
 
-x = prop_pwc(H0, Hc/2, u_ctrl, complex(c0))
+x = prop_pwc(H0, Tc/2, u_ctrl, complex(c0))
 
 x2 = hcat(x...) 
 
