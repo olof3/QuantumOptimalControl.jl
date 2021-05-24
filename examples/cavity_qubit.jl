@@ -91,9 +91,6 @@ dλdt = generate_function(sys; expression=Val{false})[2]
 
 f_u = λ * Symbolics.jacobian(complex2real(f), complex2real([u]))
 
-
-
-
 ##
 
 function wrap_f(f)
