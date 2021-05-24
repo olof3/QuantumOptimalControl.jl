@@ -2,6 +2,8 @@ module QuantumOptimalControl
 
 using LinearAlgebra
 
+using Zygote
+
 using DifferentialEquations
 using DiffEqSensitivity: ForwardDiffSensitivity
 
@@ -9,16 +11,30 @@ using Plots
 
 include("utils.jl")
 include("parameterized_pulses.jl")
+include("gradient_computations.jl")
 
 export propagator, real2complex, complex2real
 
 export u_drag, u_sinebasis, annihilation_op
+
+export compute_pwc_gradient, propagate_pwc
 
 function wrap_controls(dxdt, u_fcn)
     function(dx, x, p, t)
         dxdt(dx, x, [reim(u_fcn(p,t))...], t)
     end
 end
+
+
+function wrap_f(f)
+    function(dx, x, p, t)
+        @inbounds @views for j=1:size(x,2)
+            f(dx[:,j], x[:,j], p[1], t)
+        end
+    end
+end
+
+
 
 function plot_propagation(t, Ut_vec)
     n = size(Ut_vec[1], 1)
