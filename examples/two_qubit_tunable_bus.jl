@@ -1,5 +1,6 @@
 using QuantumOptimalControl
 using ModelingToolkit, SparseArrays, DifferentialEquations
+using Plots
 
 N = 3
 
@@ -25,26 +26,10 @@ Hc = ωc0 * ac' * ac
 H0 = Hq1 + Hq2 + Hi1 + Hi2
 
 state_labels = map(e -> string("|", reverse(e)..., "⟩"), collect(Iterators.product(0:2, 0:2, 0:2))[:])
-# kron([string.(0:N-1) for N in (3,3,3)]...)
+sdict = Dict(kron([string.(0:N-1) for N in (3,3,3)]...) .=> 1:27)
 
-Ntot = N*N*N
-@parameters t u
-@variables Uᵣ[1:Ntot](t) Uᵢ[1:Ntot](t)
-D = Differential(t)
-U = Uᵣ + im*Uᵢ
 
-Htot = sparse(H0 + u*Hc)
-
-symrhs = -1im * (Htot * U)
-symrhs = simplify.(symrhs)
-symlhs = D.(U)
-
-eqs = symlhs .~ symrhs
-
-eqs_vec = vcat(eqs...) # Since complex-valued equations become a Vector of two equations
-sys = ODESystem(eqs_vec, t, complex2real(U[:]), [u])
-
-dxdt = generate_function(sys; expression=Val{false})[2]
+##
 
 
 # Compute transformation
@@ -68,7 +53,8 @@ function envelope(t, p)
         A / 2 * (1 - cos(2π * (t - t_plateau) / t_rise_fall))
     end
     Φ = θ0 + δ * cos(ω_Φ * t)
-    return sqrt(abs(cos(π * Φ))) # θ + δ *cos(ω_Φ * t)
+    return sqrt(abs(cos(π * Φ))) # θ + δ *cos(ω_Φ * t)   
+    #return √cos(π * θ0) - δ*cos(ω_Φ*t)
 end
 
 # Pulse parameters
@@ -86,8 +72,30 @@ f_offset = -0.002
 
 p0 = [t_plateau, t_rise_fall, θ0, ω_Φ, δ]
 
+##
+Ntot = N*N*N
+@parameters t u
+@variables Uᵣ[1:Ntot](t) Uᵢ[1:Ntot](t)
+D = Differential(t)
+U = Uᵣ + im*Uᵢ
+
+Htot = sparse(H0 + u*Hc)
+
+symrhs = -1im * (Htot * U)
+symrhs = simplify.(symrhs)
+symlhs = D.(U)
+
+eqs = symlhs .~ symrhs
+
+eqs_vec = vcat(eqs...) # Since complex-valued equations become a Vector of two equations
+sys = ODESystem(eqs_vec, t, complex2real(U[:]), [u])
+
+dxdt = generate_function(sys; expression=Val{false})[2]
+
+##
+
 tlist = LinRange(0.0, t_rise_fall + t_plateau, Int(round(2 * (t_rise_fall + t_plateau))))
-plot(tlist, t -> envelope(t, p0))
+plot(tlist, [t -> envelope(t, p0), t -> √cos(π * θ0) - δ*cos(ω_Φ*t)])
 
 function wrap_control(dxdt, u_fcn)
     return (dx, x, p, t) -> dxdt(dx, x, u_fcn(t,p), t)
@@ -98,7 +106,12 @@ Tgate = t_rise_fall + t_plateau
 
 prob = ODEProblem{true}(dxdt_wrapped, (complex2real(initialstate)), (0.0, Tgate))
 
-@time sol = solve(prob, Tsit5(), p=p0, saveat=[Tgate], adaptive=false, dt=0.1e-3)
+#@time sol = solve(prob, Tsit5(), p=p0, saveat=[Tgate], adaptive=false, dt=0.1e-3)
+@time sol = solve(prob, Tsit5(), p=p0, adaptive=false, dt=1e-3, saveat=0:0.5e-3:Tgate)
+GC.gc()
+
+t = sol.t
+@time solc = hcat(real2complex.(sol.u)...)
 
 finalstate = sol.u[end]
 cost = abs2(real2complex(finalstate)' * (targetstate))

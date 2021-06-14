@@ -10,10 +10,18 @@ using DiffEqSensitivity: ForwardDiffSensitivity
 using Plots
 
 include("utils.jl")
+include("fidelities.jl")
 include("parameterized_pulses.jl")
 include("gradient_computations.jl")
 
-export propagator, real2complex, complex2real
+
+
+export propagator, real2complex, complex2real, c2r, r2c
+
+export abs_trace_phase_calibrated
+
+const c2r = complex2real
+const r2c = real2complex
 
 export u_drag, u_sinebasis, annihilation_op
 

@@ -24,3 +24,12 @@ function u_sinebasis(p, t)#::Tuple{Float64,Float64}
     return Complex(Ωx, Ωy)
 end
 
+function cos_envelope(t_plateau, t_rise_fall, t)
+    if t > t_rise_fall / 2 && t <= t_rise_fall / 2 + t_plateau
+        1
+    elseif t <= t_rise_fall / 2
+        1 / 2 * (1 - cos(2π * t / t_rise_fall))
+    elseif t > t_rise_fall / 2 + t_plateau
+        1 / 2 * (1 - cos(2π * (t - t_plateau) / t_rise_fall))
+    end
+end

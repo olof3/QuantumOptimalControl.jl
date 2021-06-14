@@ -11,13 +11,11 @@ u_data = u_data0[:, :]
 x_target = normalize!(kron([1, 0], exp.(1im*theta)))
 Jfinal = x -> 1 - norm(x_target' * x) # Hmm, what is the gradient
 
-@time x, λ, dJdu = QuantumOptimalControl.grape_naive(A0, [A1, A2], Jfinal, u_data[:,1:100], c0)
+@time x, λ, dJdu = QuantumOptimalControl.grape_naive(A0, [A1, A2], Jfinal, u_data[:,1:100], c0, ; dUkdp_order=3)
 
 display(dJdu)
 
-##
-
-# DiffEq based version
+## DiffEq-based version
 x0 = complex2real(c0)[:,:]
 #c0real = float(complex2real(I(24)))
 
@@ -32,19 +30,14 @@ display(dJdu2)
 
 
 
+## Finite diff
+
 using FiniteDiff
-
-# Finite diff
-
-#propagate_pwc(dxdt, x0, u_data[:, 1:10], 1.0, cache).u[end]
 obj = u -> Jfinal(real2complex(propagate_pwc(dxdt, x0, u, 1.0, cache).u[end]))
 obj(u_data[:, 1:100])
 
 dJdu3 = FiniteDiff.finite_difference_gradient(obj, u_data[:, 1:100])
 display(dJdu3)
-
-
-# construct derivative using symbolics
 
 
     
