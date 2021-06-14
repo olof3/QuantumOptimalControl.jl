@@ -33,11 +33,23 @@ function wrap_controls(dxdt, u_fcn)
     end
 end
 
-
-function wrap_f(f)
+function wrap_envelope(f, u_fcn)
     function(dx, x, p, t)
+        u = u_fcn(p, t) # Preferably tuple if not a scalar
+        if x isa Vector # https://github.com/JuliaLang/julia/issues/41221
+            f(dx, x, u, t)
+        else
+            @inbounds @views for j=1:size(x,2)
+                f(dx[:,j], x[:,j], u, t)
+            end
+        end
+    end
+end
+function wrap_f_old(f, u_fcn)
+    function(dx, x, p, t)
+        u = u_fcn(p, t) # Preferably tuple if not a scalar
         @inbounds @views for j=1:size(x,2)
-            f(dx[:,j], x[:,j], p[1], t)
+            f(dx[:,j], x[:,j], u, t)
         end
     end
 end

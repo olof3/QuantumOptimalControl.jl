@@ -41,7 +41,7 @@ targetstate = kron([0, 0, 1], [1, 0, 0], [1, 0, 0]) # |200>
 #initialstate = kron(qt.basis(N, 1), qt.basis(N, 1), qt.basis(N, 0))
 #targetstate = kron(qt.basis(N, 2), qt.basis(N, 0), qt.basis(N, 0))
 
-function envelope(t, p)
+function envelope(p, t)
     t_plateau, t_rise_fall, θ0, ω_Φ, A = p
     
     δ = QuantumOptimalControl.cos_envelope(t_plateau, t_rise_fall, t)
@@ -84,24 +84,20 @@ dxdt = Symbolics.build_function(Symbolics.simplify.(c2r(rhs)), c2r(x), u, expres
 ##
 
 tlist = LinRange(0.0, t_rise_fall + t_plateau, Int(round(2 * (t_rise_fall + t_plateau))))
-plot(tlist, [t -> envelope(t, p0), t -> √cos(π * θ0) - δ*cos(ω_Φ*t)])
+plot(tlist, [t -> envelope(p0, t), t -> √cos(π * θ0) - δ*cos(ω_Φ*t)])
 
-function wrap_control(dxdt, u_fcn)
-    return (dx, x, p, t) -> dxdt(dx, x, u_fcn(t,p), t)
-end
-dxdt_wrapped = wrap_control(dxdt, envelope)
+dxdt_wrapped = QuantumOptimalControl.wrap_envelope(dxdt, envelope)
 
 Tgate = t_rise_fall + t_plateau
 
-prob = ODEProblem{true}(dxdt_wrapped, (complex2real(initialstate)), (0.0, Tgate))
+prob = ODEProblem{true}(dxdt_wrapped, c2r(initialstate), (0.0, Tgate))
 
-#@time sol = solve(prob, Tsit5(), p=p0, saveat=[Tgate], adaptive=false, dt=0.1e-3)
-@time sol = DifferentialEquations.solve(prob, Tsit5(), p=p0, adaptive=false, dt=1e-3, saveat=0:0.5e-3:Tgate)
+@btime sol = DifferentialEquations.solve(prob, Tsit5(), p=p0, adaptive=false, dt=1e-3, saveat=0:1e-3:Tgate)
 GC.gc()
 
 t = sol.t
-@time solc = hcat(real2complex.(sol.u)...)
+@time solc = hcat(r2c.(sol.u)...)
 
 finalstate = sol.u[end]
-cost = abs2(real2complex(finalstate)' * (targetstate))
+cost = abs2(r2c(finalstate)' * (targetstate))
 println(cost) # Should be something like 0.937218
