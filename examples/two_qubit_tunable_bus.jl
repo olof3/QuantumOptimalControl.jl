@@ -1,5 +1,5 @@
 using QuantumOptimalControl
-using ModelingToolkit, SparseArrays, DifferentialEquations
+using Symbolics, DifferentialEquations
 using Plots
 
 N = 3
@@ -31,7 +31,6 @@ sdict = Dict(kron([string.(0:N-1) for N in (3,3,3)]...) .=> 1:27)
 
 ##
 
-
 # Compute transformation
 # Transform initial state, select eigenstates
 
@@ -45,14 +44,9 @@ targetstate = kron([0, 0, 1], [1, 0, 0], [1, 0, 0]) # |200>
 function envelope(t, p)
     t_plateau, t_rise_fall, θ0, ω_Φ, A = p
     
-    δ = if t > t_rise_fall / 2 && t <= t_rise_fall / 2 + t_plateau
-        A
-    elseif t <= t_rise_fall / 2
-        A / 2 * (1 - cos(2π * t / t_rise_fall))
-    elseif t > t_rise_fall / 2 + t_plateau
-        A / 2 * (1 - cos(2π * (t - t_plateau) / t_rise_fall))
-    end
-    Φ = θ0 + δ * cos(ω_Φ * t)
+    δ = QuantumOptimalControl.cos_envelope(t_plateau, t_rise_fall, t)
+
+    Φ = θ0 + A * δ * cos(ω_Φ * t)
     return sqrt(abs(cos(π * Φ))) # θ + δ *cos(ω_Φ * t)   
     #return √cos(π * θ0) - δ*cos(ω_Φ*t)
 end
@@ -73,24 +67,19 @@ f_offset = -0.002
 p0 = [t_plateau, t_rise_fall, θ0, ω_Φ, δ]
 
 ##
+
+A0 = -im*H0
+A1 = -im*Hc
+
 Ntot = N*N*N
-@parameters t u
-@variables Uᵣ[1:Ntot](t) Uᵢ[1:Ntot](t)
-D = Differential(t)
-U = Uᵣ + im*Uᵢ
 
-Htot = sparse(H0 + u*Hc)
+@variables xᵣ[1:Ntot], xᵢ[1:Ntot]
+@variables u
+x = xᵣ + im*xᵢ
 
-symrhs = -1im * (Htot * U)
-symrhs = simplify.(symrhs)
-symlhs = D.(U)
+rhs = (A0 + u*A1)*x
 
-eqs = symlhs .~ symrhs
-
-eqs_vec = vcat(eqs...) # Since complex-valued equations become a Vector of two equations
-sys = ODESystem(eqs_vec, t, complex2real(U[:]), [u])
-
-dxdt = generate_function(sys; expression=Val{false})[2]
+dxdt = Symbolics.build_function(Symbolics.simplify.(c2r(rhs)), c2r(x), u, expression=Val{false})[2]
 
 ##
 
@@ -107,7 +96,7 @@ Tgate = t_rise_fall + t_plateau
 prob = ODEProblem{true}(dxdt_wrapped, (complex2real(initialstate)), (0.0, Tgate))
 
 #@time sol = solve(prob, Tsit5(), p=p0, saveat=[Tgate], adaptive=false, dt=0.1e-3)
-@time sol = solve(prob, Tsit5(), p=p0, adaptive=false, dt=1e-3, saveat=0:0.5e-3:Tgate)
+@time sol = DifferentialEquations.solve(prob, Tsit5(), p=p0, adaptive=false, dt=1e-3, saveat=0:0.5e-3:Tgate)
 GC.gc()
 
 t = sol.t
