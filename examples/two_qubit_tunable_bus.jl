@@ -14,7 +14,8 @@ g1 = 0.04 * 2π
 g2 = 0.04 * 2π
 
 # OPERATORS
-a1, a2, ac = QuantumOptimalControl.annihilation_op(3, 3, 3)
+qb = QuantumOptimalControl.QuantumBasis([3,3,3])
+a1, a2, ac = annihilation_ops(qb)
 
 # HAMILTONIAN
 Hq1 = ω1 * a1'*a1 + α1 * a1'*a1 * (a1'*a1 - I)
@@ -27,6 +28,11 @@ H0 = Hq1 + Hq2 + Hi1 + Hi2
 
 state_labels = map(e -> string("|", reverse(e)..., "⟩"), collect(Iterators.product(0:2, 0:2, 0:2))[:])
 sdict = Dict(kron([string.(0:N-1) for N in (3,3,3)]...) .=> 1:27)
+
+dims = [3,3,3]
+state_labels2 = map(e -> string("|", reverse(e)..., "⟩"), collect(Iterators.product([0:n-1 for n in dims]...))[:])
+state_dict2 = Dict(kron([string.(0:n-1) for n in dims]...) .=> 1:prod(dims))
+
 
 
 ##
@@ -47,8 +53,8 @@ function envelope(p, t)
     δ = QuantumOptimalControl.cos_envelope(t_plateau, t_rise_fall, t)
 
     Φ = θ0 + A * δ * cos(ω_Φ * t)
-    return sqrt(abs(cos(π * Φ))) # θ + δ *cos(ω_Φ * t)   
-    #return √cos(π * θ0) - δ*cos(ω_Φ*t)
+    return sqrt(abs(cos(π * Φ)))
+    #return √cos(π * θ0) - A*δ*cos(ω_Φ*t)
 end
 
 # Pulse parameters
@@ -62,9 +68,9 @@ t_rise_fall = 50.0
 f_offset = -0.002
 ω_Φ = ω_th + f_offset * 2π  # ω_offset is given in GHz !!??!! Hmmm
 
-δ = 0.13
+A = 0.13
 
-p0 = [t_plateau, t_rise_fall, θ0, ω_Φ, δ]
+p0 = [t_plateau, t_rise_fall, θ0, ω_Φ, A]
 
 ##
 
@@ -75,16 +81,15 @@ Ntot = N*N*N
 
 @variables xᵣ[1:Ntot], xᵢ[1:Ntot]
 @variables u
+
 x = xᵣ + im*xᵢ
-
 rhs = (A0 + u*A1)*x
-
 dxdt = Symbolics.build_function(Symbolics.simplify.(c2r(rhs)), c2r(x), u, expression=Val{false})[2]
 
 ##
 
 tlist = LinRange(0.0, t_rise_fall + t_plateau, Int(round(2 * (t_rise_fall + t_plateau))))
-plot(tlist, [t -> envelope(p0, t), t -> √cos(π * θ0) - δ*cos(ω_Φ*t)])
+plot(tlist, [t -> envelope(p0, t), t -> √cos(π * θ0) - A*cos(ω_Φ*t)])
 
 dxdt_wrapped = QuantumOptimalControl.wrap_envelope(dxdt, envelope)
 

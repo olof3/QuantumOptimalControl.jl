@@ -1,5 +1,7 @@
 module QuantumOptimalControl
 
+using LinearAlgebra: getindex
+using Plots: getindex
 using LinearAlgebra
 
 using Zygote
@@ -23,7 +25,7 @@ export abs_trace_phase_calibrated
 const c2r = complex2real
 const r2c = real2complex
 
-export u_drag, u_sinebasis, annihilation_op
+export u_drag, u_sinebasis, annihilation_op, annihilation_ops
 
 export compute_pwc_gradient, propagate_pwc
 

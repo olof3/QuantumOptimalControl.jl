@@ -1,10 +1,21 @@
-
+function infidelity(U_target, Uf)
+    if size(U_target) == (4,4)
+        return 1 - abs_trace_phase_calibrated(U_target' * Uf) / 4
+    else
+        error("Not supported yet")
+    end
+end
 
 function abs_trace_phase_calibrated(M, calibration=:lms_phase)
     m = diag(M)
 
-    θ = if calibration === :lms_phase
-        lms_phase_calibration(m)
+    if calibration === :lms_phase
+        θ1 = -angle(conj(m[1])*m[2] + conj(m[3])*m[4])
+        return abs(m[1] + m[2]*cis(θ1)) + abs(m[3] + m[4]*cis(θ1))
+    end
+
+    θ = if calibration === :lms_phase_semiold
+        lms_phase_calibration_semiold(m)
     elseif calibration === :lms_phase_old
         lms_phase_calibration_old(m)
     elseif calibration === :basic
@@ -13,7 +24,7 @@ function abs_trace_phase_calibrated(M, calibration=:lms_phase)
         grid_calibration(m)
     end
     
-    return abs(sum(m[1] + m[2]*cis(θ[1]) + m[3]*cis(θ[2]) + m[4]*cis(θ[1] + θ[2])))
+    return abs(m[1] + m[2]*cis(θ[1]) + m[3]*cis(θ[2]) + m[4]*cis(θ[1] + θ[2]))
 end
 
 # Current approach
@@ -24,7 +35,7 @@ function basic_calibration(m)
     return [-θ1, -θ2]
 end
 # Seems to be very close to optimal, at least for overlap fidelity
-function lms_phase_calibration(m)
+function lms_phase_calibration_semiold(m)
     θ = [angle(conj(m[1])*m[2] + conj(m[3])*m[4]),
          angle(conj(m[1])*m[3] + conj(m[2])*m[4])]
 
