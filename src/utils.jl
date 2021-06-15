@@ -42,7 +42,7 @@ end
 
 function Base.getindex(qb::QuantumBasis, rows::Union{String,Vector{String},Colon}, cols::Union{String,Vector{String},Colon})
     row_inds = rows isa Union{String,Vector{String}} ? Base.getindex.(Ref(qb.state_dict), rows) : rows
-    col_inds = rows isa Union{String,Vector{String}} ? Base.getindex.(Ref(qb.state_dict), cols) : cols
+    col_inds = cols isa Union{String,Vector{String}} ? Base.getindex.(Ref(qb.state_dict), cols) : cols
     I[1:qb.Ntot,1:qb.Ntot][row_inds, col_inds]
 end
 

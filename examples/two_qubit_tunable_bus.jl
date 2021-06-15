@@ -33,19 +33,11 @@ dims = [3,3,3]
 state_labels2 = map(e -> string("|", reverse(e)..., "⟩"), collect(Iterators.product([0:n-1 for n in dims]...))[:])
 state_dict2 = Dict(kron([string.(0:n-1) for n in dims]...) .=> 1:prod(dims))
 
-
-
 ##
 
-# Compute transformation
-# Transform initial state, select eigenstates
-
 # INITIAL AND TARGET STATE, RESONANCE (CZ: 11 -> 20)
-initialstate = complex(float(kron([0, 1, 0], [0, 1, 0], [1, 0, 0]))) # |110>
-targetstate = kron([0, 0, 1], [1, 0, 0], [1, 0, 0]) # |200>
-
-#initialstate = kron(qt.basis(N, 1), qt.basis(N, 1), qt.basis(N, 0))
-#targetstate = kron(qt.basis(N, 2), qt.basis(N, 0), qt.basis(N, 0))
+x0 = qb[:, "110"]
+xtarget = qb[:, "200"]
 
 function envelope(p, t)
     t_plateau, t_rise_fall, θ0, ω_Φ, A = p
@@ -64,7 +56,8 @@ t_rise_fall = 50.0
 
 θ0 = 0.25
 
-ω_th = abs(H0[1 * N * N + 1 * N + 1, 1 * N * N + 1 * N + 1] - H0[2 * N * N + 1, 2 * N * N + 1])  # true eigenvalues are a better guess
+i1 = qb.state_dict["110"]; i2 = qb.state_dict["200"]
+ω_th = abs(H0[i1, i1] - H0[i2, i2])  # true eigenvalues are a better guess
 f_offset = -0.002
 ω_Φ = ω_th + f_offset * 2π  # ω_offset is given in GHz !!??!! Hmmm
 
@@ -95,14 +88,17 @@ dxdt_wrapped = QuantumOptimalControl.wrap_envelope(dxdt, envelope)
 
 Tgate = t_rise_fall + t_plateau
 
-prob = ODEProblem{true}(dxdt_wrapped, c2r(initialstate), (0.0, Tgate))
+prob = ODEProblem{true}(dxdt_wrapped, c2r(x0), (0.0, Tgate))
 
-@btime sol = DifferentialEquations.solve(prob, Tsit5(), p=p0, adaptive=false, dt=1e-3, saveat=0:1e-3:Tgate)
+@time sol = DifferentialEquations.solve(prob, Tsit5(), p=p0, adaptive=false, dt=1e-3, saveat=0:1e-3:Tgate)
 GC.gc()
 
 t = sol.t
-@time solc = hcat(r2c.(sol.u)...)
 
 finalstate = sol.u[end]
-cost = abs2(r2c(finalstate)' * (targetstate))
+cost = abs2(r2c(finalstate)' * (xtarget))
 println(cost) # Should be something like 0.937218
+
+
+# Compute transformation
+# Transform initial state, select eigenstates
