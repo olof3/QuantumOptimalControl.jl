@@ -1,6 +1,7 @@
 using QuantumOptimalControl
 
-x0 = c0
+include("../examples/cavity_qubit.jl")
+
 A0 = -im*1e-9*H0
 A1 = -im*(Tc + Tc')/2
 A2 = -im*(im*(Tc - Tc'))/2
@@ -41,3 +42,8 @@ display(dJdu3)
 
 
     
+
+
+
+
+@time x, λ, dJdu = QuantumOptimalControl.grape_naive(A0, [A1, A2], Jfinal, u_data, x0 ; dUkdp_order=3)

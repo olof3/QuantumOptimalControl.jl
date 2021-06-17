@@ -1,6 +1,6 @@
-function infidelity(U_target, Uf)
+function infidelity(U_target, Uf, calibration=:lms_phase)
     if size(U_target) == (4,4)
-        return 1 - abs_trace_phase_calibrated(U_target' * Uf) / 4
+        return 1 - abs_trace_phase_calibrated(U_target' * Uf, calibration) / 4
     else
         error("Not supported yet")
     end

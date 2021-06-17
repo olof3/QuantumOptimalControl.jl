@@ -26,13 +26,6 @@ Hc = ωc0 * ac' * ac
 
 H0 = Hq1 + Hq2 + Hi1 + Hi2
 
-state_labels = map(e -> string("|", reverse(e)..., "⟩"), collect(Iterators.product(0:2, 0:2, 0:2))[:])
-sdict = Dict(kron([string.(0:N-1) for N in (3,3,3)]...) .=> 1:27)
-
-dims = [3,3,3]
-state_labels2 = map(e -> string("|", reverse(e)..., "⟩"), collect(Iterators.product([0:n-1 for n in dims]...))[:])
-state_dict2 = Dict(kron([string.(0:n-1) for n in dims]...) .=> 1:prod(dims))
-
 ##
 
 # INITIAL AND TARGET STATE, RESONANCE (CZ: 11 -> 20)
@@ -95,8 +88,8 @@ GC.gc()
 
 t = sol.t
 
-finalstate = sol.u[end]
-cost = abs2(r2c(finalstate)' * (xtarget))
+xfinal = sol.u[end]
+cost = abs2(r2c(xfinal)' * (xtarget))
 println(cost) # Should be something like 0.937218
 
 

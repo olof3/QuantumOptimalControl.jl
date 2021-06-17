@@ -1,5 +1,5 @@
 # shouldn't need matrix conversions (vectorize vectors first, then apply these)
-function complex2real(A::AbstractVector)
+function complex2real(A::Union{Number,AbstractVector})
     Ar = Vector{real(eltype(A))}(undef, 2 * length(A))
     Ar[1:2:end] .= real.(A)
     Ar[2:2:end] .= imag.(A)
@@ -65,3 +65,21 @@ end
 annihilation_ops(qb::QuantumBasis) = annihilation_ops(qb.dims...)
 
 qubit_hamiltonian(ωr, α, n) = diagm([k*ωr + α*(k-1)*k/2 for k=0:n-1])
+
+
+
+
+function compress_states(x, v)
+    n1, n2 = length(v[1][2]), length(v[2][2])
+    x_compr = zeros(eltype(x), size(x,1), max(n1,n2))
+    x_compr[v[1][1], 1:n1] .= x[v[1][1], v[1][2]]
+    x_compr[v[2][1], 1:n2] .= x[v[2][1], v[2][2]]
+    x_compr
+end
+function decompress_states(x_compr, v)
+    n1, n2 = length(v[1][2]), length(v[2][2])
+    x = zeros(eltype(x_compr), size(x_compr,1), n1 + n2)
+    x[v[1][1], v[1][2]] .= x_compr[v[1][1], 1:n1]
+    x[v[2][1], v[2][2]] .= x_compr[v[2][1], 1:n2]
+    x
+end
