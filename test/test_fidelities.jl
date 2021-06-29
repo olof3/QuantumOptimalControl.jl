@@ -62,7 +62,7 @@ abs_trace_phase_calibrated(M) ≈ abs_trace_optimal(M)
 
 
 M = Diagonal([im, 1, im, -1]) # Problematic case
-@test abs_trace_phase_calibrated(M) ≈ 2sqrt(2)
+@test abs_trace_phase_calibrated(M, :lms_phase) ≈ abs_trace_optimal(M)
 #abs_trace_phase_calibrated(M, :lms_phase_semiold) # fails
 
 M = Diagonal([im, 0.1, 0.1*im, -1])

@@ -64,6 +64,7 @@ subspace_target = full_target_operation * cavity_subspace_projector
 
 ##
 
+Ntot = N_qubit * N_cavity
 @variables xᵣ[1:Ntot], xᵢ[1:Ntot]
 @variables uᵣ uᵢ
 
