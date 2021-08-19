@@ -6,51 +6,46 @@ function infidelity(U_target, Uf, calibration=:lms_phase)
     end
 end
 
-function abs_trace_phase_calibrated(M, calibration=:lms_phase)
+function abs_trace_phase_calibrated(M, calibration=:optimal)
     m = diag(M)
 
     normalize(x) = x / abs(x)
 
     if calibration === :lms_phase
+        # https://en.wikipedia.org/wiki/Mean_of_circular_quantities
         θ1 = -angle(conj(m[1])*m[2] + conj(m[3])*m[4]) # divide by (abs(m[1]) + abs(m[2]))
         return abs(m[1] + m[2]*cis(θ1)) + abs(m[3] + m[4]*cis(θ1))
     end
-
     if calibration === :lms_phase2
         x1, x2 = sqrt(abs(m[1]*m[2])), sqrt(abs(m[3]*m[4]))
-        θ11 = -angle(conj(m[1])*m[2] / x1 + conj(m[3])*m[4] / x2) # divide by (abs(m[1]) + abs(m[2]))
+        if x1 < eps() || x2 < eps()
+            return abs(m[1]) + abs(m[2]) + abs(m[3]) + abs(m[4])
+        end
+        θ11 = -angle(conj(m[1])*m[2] / x1 + conj(m[3])*m[4] / x2) # divide by (abs(m[1]) + abs(m[2]))        
         return abs(m[1] + m[2]*cis(θ11)) + abs(m[3] + m[4]*cis(θ11))
     end
-
     if calibration === :lms_phase3
-        #r = abs.(m)
-        v1, v2 = sqrt(abs(m[1]*m[2])), sqrt(abs(m[3]*m[4])) #abs(m[1]) + abs(m[2]), abs(m[3]) + abs(m[4])
-
-        x = normalize(m[1]*conj(m[2]) / v1 + m[3]*conj(m[4]) / v2) # divide by (abs(m[1]) + abs(m[2]))
-        v1, v2 = abs(m[1] + x*m[2]), abs(m[3] + x*m[4])
-
-        x = normalize(m[1]*conj(m[2]) / v1 + m[3]*conj(m[4]) / v2) # divide by (abs(m[1]) + abs(m[2]))
-        v1, v2 = abs(m[1] + x*m[2]), abs(m[3] + x*m[4])
-
-        #x = normalize(m[1]*conj(m[2]) / v1 + m[3]*conj(m[4]) / v2) # divide by (abs(m[1]) + abs(m[2]))
-        #v1, v2 = abs(m[1] + x*m[2]), abs(m[3] + x*m[4])
-
-        #x = normalize(m[1]*conj(m[2]) / v1 + m[3]*conj(m[4]) / v2) # divide by (abs(m[1]) + abs(m[2]))
-        #v1, v2 = abs(m[1] + x*m[2]), abs(m[3] + x*m[4])
-
-        return v1 + v2
-    end
-
-    θ = if calibration === :lms_phase_semiold
-        lms_phase_calibration_semiold(m)[1]
-    elseif calibration === :lms_phase_old
-        return lms_phase_calibration_old(m)[1]
-    elseif calibration === :basic
+        x1, x2 = (abs(m[1]) + abs(m[2])), (abs(m[3]) + abs(m[4]))
+        θ11 = -angle(conj(m[1])*m[2] / x1 + conj(m[3])*m[4] / x2) # divide by (abs(m[1]) + abs(m[2]))
+        return abs(m[1] + m[2]*cis(θ11)) + abs(m[3] + m[4]*cis(θ11))
+    end    
+    
+    if calibration === :basic
         return basic_calibration(m)[1]
+    elseif calibration === :optimal
+        return optimal_calibration(m)[1]
     elseif calibration === :grid
         return grid_calibration(m)[1]
     end
 end
+
+function abs_trace_phase_calibrated_grad(m, θ1_opt)
+    v1 = (m[1] + cis(θ1_opt)*m[2])
+    v2 = (m[3] + cis(θ1_opt)*m[4])
+    dF_dm = 2*(abs(v1) + abs(v2)) .* [v1 / abs(v1), v1 / abs(v1) * cis(-θ1_opt), v2/abs(v2),  v2/abs(v2) * cis(-θ1_opt)]
+end
+
+
 
 # Current approach
 function basic_calibration(m)
@@ -58,61 +53,43 @@ function basic_calibration(m)
     θ = [-(angle(m[2]) - θ0), -(angle(m[3]) - θ0)]
     return abs(m[1] + m[2]*cis(θ[1]) + m[3]*cis(θ[2]) + m[4]*cis(θ[1] + θ[2])), θ
 end
-# Seems to be very close to optimal, at least for overlap fidelity
-function lms_phase_calibration_semiold(m)
-    θ = [angle(m[1]*conj(m[2]) + m[3]*conj(m[4])),
-         angle(m[1]*conj(m[3]) + m[2]*conj(m[4]))]
-
-    return abs(m[1] + m[2]*cis(θ[1]) + m[3]*cis(θ[2]) + m[4]*cis(θ[1] + θ[2])), θ
-
-end
-function lms_phase_calibration_old(m) # Has problems with wrap-around
-    ϕ = angle.(m)
-
-    #θ0 = [-1 0 0; -1 1 0; -1 0 1; -1 1 1] \ ϕ; θ = θ0[2:3]
-    # pinv([-1 0 0; -1 1 0; -1 0 1; -1 1 1])[2:3, :]
-
-    R = [-0.5    0.5   -0.5   0.5;
-         -0.5   -0.5    0.5   0.5]
-    θ = R * ϕ
-
-    θ[1] += mod(θ[1] - (ϕ[2]-ϕ[1]) + π, 2π) - π < 1.5 ? 0 : π
-    θ[2] += mod(θ[2] - (ϕ[3]-ϕ[1]) + π, 2π) - π < 1.5 ? 0 : π
-
-    return -θ
-end
-
-
-# https://en.wikipedia.org/wiki/Mean_of_circular_quantities
-# Slightly worse version. Probably also has wrapping problems
-#ϕ = angle(m[2:4]) .- angle(m[1])
-#R = [2/3 -1/3 1/3;
-#    -1/3  2/3 1/3] # [1 0; 0 1; 1 1] \ I(3)
-#θ = R * ϕ
 
 # To avoid dependening on an optimization package this is only a rather course grid search.
 function grid_calibration(m)
     J = θ -> abs(m[1] + m[2]*cis(θ)) + abs(m[3] + m[4]*cis(θ))
 
-    J_best, θ_best = findmax(J, LinRange(0,2π,100))
+    θ_vec = LinRange(0,2π,100)
+    J_best, k_best = findmax(J, θ_vec)
 
-    return J_best, θ_best
+    return J_best, θ_vec[k_best]
 end
 
-function optimal_calibration(m, θ_tol=1e-15)
-    J = θ -> abs(m[1] + m[2]*cis(θ)) + abs(m[3] + m[4]*cis(θ))
+function optimal_calibration(m, θ_tol=1e-9)
+    a1 = abs2(m[1]) + abs2(m[2]); b1 = 2*abs(m[1])*abs(m[2])
+    a2 = abs2(m[3]) + abs2(m[4]); b2 = 2*abs(m[3])*abs(m[4])
+    
+    ϕ1 = mod2pi(angle(m[1]) - angle(m[2]))
+    ϕ2 = mod2pi(angle(m[3]) - angle(m[4]))
+    ϕ_mean, Δ, α = if abs(ϕ2 - ϕ1) <= π
+        (ϕ1 + ϕ2)/2, abs(ϕ2 - ϕ1)/2, ϕ1 < ϕ2 ? 1 : -1
+    else        
+        (2π + ϕ1 + ϕ2)/2, π - abs(ϕ2 - ϕ1)/2, ϕ1 < ϕ2 ? -1 : 1
+    end
 
-    θa, θb = minmax(angle(m[1]) - angle(m[2]), angle(m[3]) - angle(m[4]))
+    J = δ -> sqrt(a1 + b1*cos(δ + Δ)) + sqrt(a2 + b2*cos(δ - Δ)) # δ is deviation from ϕ_mean
+    minusJ, δ_opt = _golden_section_search(δ -> -J(δ), (-Δ, Δ), θ_tol)
 
-    minusJ1, θ1 = _golden_section_search(θ -> -J(θ), (θa, θb), θ_tol)
-    minusJ2, θ2 = _golden_section_search(θ -> -J(θ), (θb, θa + 2π), θ_tol)
+    θ1_opt = ϕ_mean + α*δ_opt
 
-    return minusJ1 < minusJ2 ? (-minusJ1, θ1) : (-minusJ2, θ2)
+    θ2_opt = angle(m[1] + m[2]*cis(θ1_opt)) - angle(m[3] + m[4]*cis(θ1_opt))
+
+    return -minusJ, [θ1_opt, θ2_opt]
 end
 
-# To avoid dependence on Optim
+
+# The golden section search is included here to avoid dependence on Optim
 function _golden_section_search(f, (x_lower, x_upper), x_tol)
-    x_lower > x_upper && error("x_lower must be less than x_upper")
+    x_lower > x_upper && error("x_lower must be less than x_upper ($x_lower, $x_upper)")
 
     golden_ratio = 0.5 * (3.0 - sqrt(5.0))
 
