@@ -19,7 +19,7 @@ a1, a2, ac = annihilation_ops(qb)
 
 # HAMILTONIAN
 Hq1 = ω1 * a1'*a1 + α1 * a1'*a1 * (a1'*a1 - I)
-Hq2 = ω2 * a2'*a2 + α2 * a2'*a2 * (a2'*a2 - I)
+Hq2 = ω2 * a2'*a2 + α2 * a2'*a2 * (a2'*a2 - I) # Factor /2 after anharmonicity missing
 Hi1 = g1 * (a1' + a1) * (ac' + ac)
 Hi2 = g2 * (a2' + a2) * (ac' + ac)
 Hc = ωc0 * ac' * ac

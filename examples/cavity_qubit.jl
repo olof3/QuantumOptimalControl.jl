@@ -7,8 +7,6 @@ using SparseArrays
 
 using QuantumOptimalControl
 
-using Plots
-
 # Optimization parameters
 N_qubit = 2 # nuber of transmon levels
 N_cavity = 12 # nuber of cavity levels
@@ -66,7 +64,10 @@ subspace_target = full_target_operation * cavity_subspace_projector
 
 Ntot = N_qubit * N_cavity
 @variables xᵣ[1:Ntot], xᵢ[1:Ntot]
+xᵣ, xᵢ = [xᵣ...], [xᵢ...]
 @variables uᵣ uᵢ
+
+
 
 u = uᵣ + im*uᵢ
 x = xᵣ + im*xᵢ
@@ -77,7 +78,9 @@ rhs = simplify.(-1im * (Htot * x))
 dxdt = Symbolics.build_function(Symbolics.simplify.(c2r(rhs)), c2r(x), c2r(u), expression=Val{false})[2]
 
 @variables λᵣ[1:Ntot] λᵢ[1:Ntot]
+λᵣ, λᵢ = [λᵣ...], [λᵢ...]
 λ = λᵣ + im*λᵢ
+
 
 rhs = simplify.(-1im * (Htot' * λ))
 dλdt = Symbolics.build_function(Symbolics.simplify.(c2r(rhs)), c2r(λ), c2r(u), expression=Val{false})[2]
@@ -111,4 +114,5 @@ x = hcat([r2c(u) for u in sol.u]...)
 
 abs(real2complex(sol.u[end])' * normalize!(diag(subspace_target)))
 
+# using Plots
 # plt1 = plot(sol.t, abs2.(x[1:11,:]'))

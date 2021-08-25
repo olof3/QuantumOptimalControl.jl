@@ -27,9 +27,8 @@ function grape_naive(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0; dUkdp_order
 
     λ[end] .= Zygote.gradient(Jfinal, x[end])[1]
 
-
     dUkdu = [similar(A0) for k=1:length(A)]
-    tmp = [similar(A0) for k=1:3]
+    tmp = [similar(A0) for k=1:4]
 
     for k=Nt:-1:1
         mul!(λ[k], Uk_vec[k]', λ[k+1]) # Propage co-states backwards
@@ -40,7 +39,8 @@ function grape_naive(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0; dUkdp_order
         # Compute derivative of exp(A0 + u1*A1 + u2*A2) wrt u1 and u2
         expm_jacobian!(dUkdu, A0, A, u[:,k], tmp, dUkdp_order)
         for j=1:length(A)
-            dJdu[j, k] = sum(real(λ[k+1]' * dUkdu[j] * x[k]))
+            #dJdu[j, k] = sum(real(λ[k+1]' * dUkdu[j] * x[k]))
+            dJdu[j, k] = sum(real(conj(λ[k+1]) .* (dUkdu[j] * x[k]))) # Possibly λ' instead, (corresponds to trace/inner product, this seems more readable)
         end
     end
 
@@ -79,7 +79,7 @@ function propagate_pwc(f, x0, u_data, Δt, cache; dt=0.1Δt)
 end
 
 setup_cache(x0, Nt) = ([similar(x0) for k=1:Nt+1], [similar(x0) for k=1:Nt+1], Matrix{float(real(eltype(x0)))}(undef, 2, Nt))
-function compute_pwc_gradient(dλdt, Jfinal::Function, u, Δt, A0, A, cache; dUkdp_order=2)
+function compute_pwc_gradient(dλdt, Jfinal::Function, u, Δt, A0, A, cache; dUkdp_order=2, dt=0.1Δt)
 
     x, λ_store, dJdu = cache
 
@@ -94,7 +94,7 @@ function compute_pwc_gradient(dλdt, Jfinal::Function, u, Δt, A0, A, cache; dUk
     end
     pcb_adj = PeriodicCallback(update_u_bwd!, -1.0, initial_affect=true, save_positions=(true,false)) # save_positions should maybe be other way around, but really shouldn't matter?
     prob_adj = ODEProblem{true}(wrap_pwc(dλdt), λf, (tgate, 0.0), callback=pcb_adj)
-    sol_adj = solve(prob_adj, Tsit5(), λ_store, p=([0.0; 0.0], u), saveat=0:Δt:tgate, adaptive=false, dt=0.1Δt)
+    sol_adj = solve(prob_adj, Tsit5(), λ_store, p=([0.0; 0.0], u), saveat=0:Δt:tgate, adaptive=false, dt=dt)
 
     # Compute loss
     λ = sol_adj.u::typeof(λ_store)
@@ -130,6 +130,7 @@ function expm_jacobian!(dFdp, A0, A, p, tmp_data, approx_order=2)
     AjX = tmp_data[2]
     XAj = tmp_data[3]
 
+
     X .= A0
     for j=1:length(A)
         X .+= p[j] .* A[j]
@@ -146,6 +147,14 @@ function expm_jacobian!(dFdp, A0, A, p, tmp_data, approx_order=2)
             mul!(dFdp[j], AjX, X, 1/6, 1)
             mul!(dFdp[j], XAj, X, 1/6, 1)
             mul!(dFdp[j], X, XAj, 1/6, 1)
+        end
+        if approx_order >= 4
+            X2 = tmp_data[4]
+            mul!(X2, X, X)
+            mul!(dFdp[j], AjX, X2, 1/24, 1)
+            mul!(dFdp[j], XAj, X2, 1/24, 1)
+            mul!(dFdp[j], X2, AjX, 1/24, 1)
+            mul!(dFdp[j], X2, XAj, 1/24, 1)
         end
     end
 end
