@@ -24,6 +24,9 @@ display(dJdu)
 #Nt = size(u, 2)
 cache = ([similar(c2r(x0)) for k=1:Nt+1], [similar(c2r(x0)) for k=1:Nt+1], Matrix{real(eltype(A0))}(undef, 2, Nt))
 
+
+
+
 @time sol = propagate_pwc(dxdt, c2r(x0), u[:,1:Nt], 1.0, cache)
 #@time sol_adj, dJdu = QuantumOptimalControl.compute_pwc_gradient(dλdt, Jfinal, u[:,1:Nt], 1.0, A0, A, cache; dUkdp_order=3)
 @time sol_adj, dJdu2 = compute_pwc_gradient(dλdt, Jfinal, u[:,1:Nt], 1.0, A0, [A1, A2], cache; dUkdp_order=3)
@@ -31,10 +34,6 @@ display(dJdu2)
 
 
 ## Finite diff
-
-
-
-
 using FiniteDiff
 obj = u -> Jfinal(r2c(propagate_pwc(dxdt, c2r(x0), u, 1.0, cache).u[end]))
 

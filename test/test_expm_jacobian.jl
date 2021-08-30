@@ -18,3 +18,12 @@ println(norm(dFdp[1] - dFdp1_approx))
 dFdp2_approx = (fexpm(u + [0, 1e-5]) - fexpm(u)) / 1e-5
 
 println(norm(dFdp[2] - dFdp2_approx))
+
+
+
+
+
+
+using FiniteDiff
+
+

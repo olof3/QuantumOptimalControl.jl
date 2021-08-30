@@ -1,5 +1,5 @@
 using QuantumOptimalControl
-using Symbolics, DifferentialEquations
+using Symbolics, DiffEqSensitivity
 using Plots
 
 N = 3
@@ -66,6 +66,7 @@ A1 = -im*Hc
 Ntot = N*N*N
 
 @variables xᵣ[1:Ntot], xᵢ[1:Ntot]
+xᵣ, xᵢ = [xᵣ...], [xᵢ...]
 @variables u
 
 x = xᵣ + im*xᵢ
