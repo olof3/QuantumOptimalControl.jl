@@ -83,3 +83,30 @@ function decompress_states(x_compr, v)
     x[v[2][1], v[2][2]] .= x_compr[v[2][1], 1:n2]
     x
 end
+
+
+function gate_unitary(gatetype)
+    U_target = zeros(4,4)
+    if gatetype == "CNOT"
+        U_target[1,1] = 1
+        U_target[2,2] = 1
+        U_target[3,4] = 1
+        U_target[4,3] = 1
+    elseif gatetype == "iSwap"
+        U_target[1,1] = 1
+        U_target[3,2] = 1
+        U_target[2,3] = 1
+        U_target[4,4] = 1
+    elseif gatetype == "CZ"
+        U_target[1,1] = 1
+        U_target[2,2] = 1
+        U_target[3,3] = 1
+        U_target[4,4] = -1
+    else
+        error("Unknown gate type")
+    end
+    return U_target
+end
+
+
+

@@ -1,13 +1,14 @@
-function grape_naive(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0; dUkdp_order=3)
+function grape_naive(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0, cache=nothing; dUkdp_order=3)
 
+    T = eltype(complex(float(x0)))
     Nt = size(u, 2)
-    T = eltype(complex(A0))
-    x = Matrix{T}[Matrix{T}(undef, size(x0[:,:])...) for k=1:Nt+1]
-    λ = Matrix{T}[Matrix{T}(undef, size(x0[:,:])...) for k=1:Nt+1]
 
-    dJdu = Matrix{real(eltype(A0))}(undef, 2, Nt)
+    if cache === nothing
+        cache = setup_grape_cache(A0, T.(x0), size(u))
+    end
 
-    Uk_vec = [similar(complex(A0)) for k=1:Nt+1]
+    x, λ, dJdu, Uk_vec = cache
+    cache.u .= u # To know the u used for the compuations
 
     x[1] .= copy(x0)
 
@@ -20,15 +21,19 @@ function grape_naive(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0; dUkdp_order
             Ak .+= u[j,k] .* A[j]
         end
 
-        Uk_vec[k] .= exp(Ak)
+        Uk_vec[k] .= ExponentialUtilities._exp!(Ak, caches=cache.exp_cache)# exp(Ak)
 
         mul!(x[k+1], Uk_vec[k], x[k])
     end
 
+
     λ[end] .= Zygote.gradient(Jfinal, x[end])[1]
+    #J, J_pullback = ChainRulesCore.rrule(Jfinal, x[end])
+    #λ[end] .= J_pullback(1)[2]
 
     dUkdu = [similar(A0) for k=1:length(A)]
     tmp = [similar(A0) for k=1:4]
+    tmp_prod = [Matrix{T}(undef, size(x0[:,:])) for k=1:2]
 
     for k=Nt:-1:1
         mul!(λ[k], Uk_vec[k]', λ[k+1]) # Propage co-states backwards
@@ -40,13 +45,29 @@ function grape_naive(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0; dUkdp_order
         expm_jacobian!(dUkdu, A0, A, u[:,k], tmp, dUkdp_order)
         for j=1:length(A)
             #dJdu[j, k] = sum(real(λ[k+1]' * dUkdu[j] * x[k]))
-            dJdu[j, k] = sum(real(conj(λ[k+1]) .* (dUkdu[j] * x[k]))) # Possibly λ' instead, (corresponds to trace/inner product, this seems more readable)
+            #dJdu[j, k] = sum(real(conj(λ[k+1]) .* (dUkdu[j] * x[k]))) # Possibly λ' instead, (corresponds to trace/inner product, this seems more readable)
+            mul!(tmp_prod[1], dUkdu[j], x[k])
+            tmp_prod[2] .= real.(conj.(λ[k+1]) .* tmp_prod[1])
+            dJdu[j, k] = sum(tmp_prod[2]) # Possibly λ' instead, (corresponds to trace/inner product, this seems more readable)
         end
     end
 
     return x, λ, dJdu
 end
 
+
+function setup_grape_cache(A0, x0, u_size)
+    T = eltype(float(x0))
+    Nt = u_size[2]
+
+    return (x = Matrix{T}[Matrix{T}(undef, size(x0[:,:])...) for k=1:Nt+1],
+            λ = Matrix{T}[Matrix{T}(undef, size(x0[:,:])...) for k=1:Nt+1],
+            dJdu = Matrix{real(T)}(undef, u_size),
+            Uk_vec = Matrix{T}[Matrix{T}(undef, size(x0,1), size(x0,1)) for k=1:Nt+1],
+            exp_cache = Matrix{eltype(A0)}[similar(A0) for k=1:6],
+            u = Matrix{real(T)}(undef, u_size) # The u used for computaitons, to avoid reevaluating
+            )
+end
 
 
 function wrap_pwc(f)
@@ -86,7 +107,8 @@ function compute_pwc_gradient(dλdt, Jfinal::Function, u, Δt, A0, A, cache; dUk
     tgate = Δt * size(u, 2)
 
     # Co-states
-    λf = reinterpret(Float64, Zygote.gradient(Jfinal, reinterpret(ComplexF64, x[end]))[1])
+    λfreal = Zygote.gradient(Jfinal, r2c(x[end]))[1]
+    λf = c2r(λfreal)
 
     function update_u_bwd!(integrator)
         k = max(Int(round(integrator.t/Δt)) - 1, 0)

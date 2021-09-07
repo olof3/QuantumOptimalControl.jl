@@ -1,15 +1,17 @@
 module QuantumOptimalControl
 
 using LinearAlgebra: getindex
-using Plots: getindex
 using LinearAlgebra
+
+using ChainRulesCore
+
+using OrdinaryDiffEq, DiffEqCallbacks
+
+import Base.getproperty, Base.getindex
 
 using Zygote
 
-using DifferentialEquations
-using DiffEqSensitivity: ForwardDiffSensitivity
-
-using Plots
+using ExponentialUtilities
 
 include("utils.jl")
 include("fidelities.jl")
@@ -22,7 +24,7 @@ export propagator, real2complex, complex2real, c2r, r2c
 
 export compress_states, decompress_states
 
-export abs_trace_phase_calibrated, infidelity
+export abs_trace_phase_calibrated, abs_sum_phase_calibrated, infidelity
 
 const c2r = complex2real
 const r2c = real2complex
@@ -58,27 +60,7 @@ function wrap_f_old(f, u_fcn)
     end
 end
 
-
-
-function plot_propagation(t, Ut_vec)
-    n = size(Ut_vec[1], 1)
-    plt = [plot() for k=1:n]
-    for j=1:n 
-        for i=1:n
-            # Use abs2 or abs?
-            plot!(plt[j], t, [abs2(Ut[i,j]) for Ut in Ut_vec], label=(j==1 ? "|$(i-1)⟩" : nothing), title="Evolution from |$(j-1)⟩")
-        end
-    end
-    if n == 2
-        layout = @layout [a b]
-    else
-        layout = @layout [a b c]
-    end
-    plt_all = plot(plt..., layout=layout, size=(1700,600))
-    display(plt_all)
-end
-
-
+#=
 function propagator(dUdt, U0, p, t)
     # Parameters are wrapped in real due to issues with reverse diff
     U0_vec = complex2real(U0[:])
@@ -93,7 +75,7 @@ function propagator(dUdt, U0, p, t)
         return sol.t, [reshape(real2complex(x), size(U0)) for x in sol.u]
     end
 end
-
+=#
 
 
 

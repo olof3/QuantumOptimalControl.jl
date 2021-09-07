@@ -1,6 +1,7 @@
 using QuantumOptimalControl
+using Zygote, ChainRulesCore
 
-include("../examples/cavity_qubit.jl")
+include("../examples/cavity_qubit_model.jl")
 
 A0 = -im*1e-9*H0
 A1 = -im*(Tc + Tc')/2
@@ -8,8 +9,14 @@ A2 = -im*(im*(Tc - Tc'))/2
 
 u = hcat([[reim(u)...] for u in u_data]...)
 
-x_target = normalize!(kron([1, 0], exp.(1im*theta)))
+x_target = normalize!(kron([1, 0], exp.(1im*theta)))[:,1:1]
 Jfinal = x -> 1 - norm(x_target' * x) # Hmm, what is the gradient
+
+#=function ChainRulesCore.rrule(::typeof(Jfinal), x)
+    Jfinal_internal = x -> 1 - norm(x_target' * x)
+    y = Jfinal_internal(x)
+    return y, xbar -> (NoTangent(), Zygote.gradient(Jfinal_internal, x)[1]::typeof(x) * xbar)
+end=#
 
 Nt = 100
 
@@ -21,13 +28,9 @@ display(dJdu)
 
 #c0real = float(complex2real(I(24)))
 
-#Nt = size(u, 2)
-cache = ([similar(c2r(x0)) for k=1:Nt+1], [similar(c2r(x0)) for k=1:Nt+1], Matrix{real(eltype(A0))}(undef, 2, Nt))
+cache = QuantumOptimalControl.setup_grape_cache(A0, c2r(x0[:,:]), (2, Nt))
 
-
-
-
-@time sol = propagate_pwc(dxdt, c2r(x0), u[:,1:Nt], 1.0, cache)
+@time sol = propagate_pwc(dxdt, c2r(x0[:,:]), u[:,1:Nt], 1.0, cache)
 #@time sol_adj, dJdu = QuantumOptimalControl.compute_pwc_gradient(dλdt, Jfinal, u[:,1:Nt], 1.0, A0, A, cache; dUkdp_order=3)
 @time sol_adj, dJdu2 = compute_pwc_gradient(dλdt, Jfinal, u[:,1:Nt], 1.0, A0, [A1, A2], cache; dUkdp_order=3)
 display(dJdu2)
@@ -40,6 +43,9 @@ obj = u -> Jfinal(r2c(propagate_pwc(dxdt, c2r(x0), u, 1.0, cache).u[end]))
 dJdu3 = FiniteDiff.finite_difference_gradient(obj, u[:, 1:100])
 display(dJdu3)
 
+
+# 0.0172903  0.0130303  0.00783313  0.00181776  -0.00486551  …  -0.0908296  -0.0940295   -0.0950277   -0.0939159
+# 0.0475966  0.0520151  0.0557292   0.058564     0.0603646       0.0234938   0.00832458  -0.00675527  -0.0214246
 
 obj = u -> Jfinal(QuantumOptimalControl.grape_naive(A0, [A1, A2], Jfinal, u, x0, ; dUkdp_order=3)[1][end])
 dJdu4 = FiniteDiff.finite_difference_gradient(obj, u[:, 1:Nt])

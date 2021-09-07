@@ -1,5 +1,5 @@
 using QuantumOptimalControl
-using Symbolics, DiffEqSensitivity
+using Symbolics, DiffEqSensitivity, OrdinaryDiffEq
 using Plots
 
 N = 3
@@ -84,7 +84,7 @@ Tgate = t_rise_fall + t_plateau
 
 prob = ODEProblem{true}(dxdt_wrapped, c2r(x0), (0.0, Tgate))
 
-@time sol = DifferentialEquations.solve(prob, Tsit5(), p=p0, adaptive=false, dt=1e-3, saveat=0:1e-3:Tgate)
+@time sol = solve(prob, Tsit5(), p=p0, adaptive=false, dt=1e-3, saveat=0:10e-3:Tgate)
 GC.gc()
 
 t = sol.t

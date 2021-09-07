@@ -6,11 +6,9 @@ function infidelity(U_target, Uf, calibration=:lms_phase)
     end
 end
 
-function abs_trace_phase_calibrated(M, calibration=:optimal)
-    m = diag(M)
+abs_trace_phase_calibrated(M, calibration=:optimal) = abs_sum_phase_calibrated(diag(M), calibration)
 
-    normalize(x) = x / abs(x)
-
+function abs_sum_phase_calibrated(m, calibration=:optimal)
     if calibration === :lms_phase
         # https://en.wikipedia.org/wiki/Mean_of_circular_quantities
         θ1 = -angle(conj(m[1])*m[2] + conj(m[3])*m[4]) # divide by (abs(m[1]) + abs(m[2]))
@@ -21,30 +19,46 @@ function abs_trace_phase_calibrated(M, calibration=:optimal)
         if x1 < eps() || x2 < eps()
             return abs(m[1]) + abs(m[2]) + abs(m[3]) + abs(m[4])
         end
-        θ11 = -angle(conj(m[1])*m[2] / x1 + conj(m[3])*m[4] / x2) # divide by (abs(m[1]) + abs(m[2]))        
+        θ11 = -angle(conj(m[1])*m[2] / x1 + conj(m[3])*m[4] / x2) # divide by (abs(m[1]) + abs(m[2]))
         return abs(m[1] + m[2]*cis(θ11)) + abs(m[3] + m[4]*cis(θ11))
     end
     if calibration === :lms_phase3
         x1, x2 = (abs(m[1]) + abs(m[2])), (abs(m[3]) + abs(m[4]))
         θ11 = -angle(conj(m[1])*m[2] / x1 + conj(m[3])*m[4] / x2) # divide by (abs(m[1]) + abs(m[2]))
         return abs(m[1] + m[2]*cis(θ11)) + abs(m[3] + m[4]*cis(θ11))
-    end    
-    
-    if calibration === :basic
-        return basic_calibration(m)[1]
-    elseif calibration === :optimal
+    end
+
+    if calibration === :optimal
         return optimal_calibration(m)[1]
+    elseif calibration === :basic
+        return basic_calibration(m)[1]
+    elseif calibration === :none
+        return abs(sum(m))
     elseif calibration === :grid
         return grid_calibration(m)[1]
     end
 end
 
-function abs_trace_phase_calibrated_grad(m, θ1_opt)
+function abs_sum_phase_calibrated_grad(m, θ1_opt)
     v1 = (m[1] + cis(θ1_opt)*m[2])
     v2 = (m[3] + cis(θ1_opt)*m[4])
     dF_dm = 2*(abs(v1) + abs(v2)) .* [v1 / abs(v1), v1 / abs(v1) * cis(-θ1_opt), v2/abs(v2),  v2/abs(v2) * cis(-θ1_opt)]
 end
 
+function ChainRulesCore.rrule(::typeof(abs_sum_phase_calibrated), m)
+    y, θ_opt = optimal_calibration(m)
+
+    v1 = (m[1] + cis(θ_opt[1])*m[2])
+    v2 = (m[3] + cis(θ_opt[1])*m[4])
+    #dF_dm = 2*(abs(v1) + abs(v2)) .* [v1 / abs(v1), v1 / abs(v1) * cis(-θ_opt[1]), v2/abs(v2),  v2/abs(v2) * cis(-θ_opt[1])]
+    dF_dm = [v1 / abs(v1), v1 / abs(v1) * cis(-θ_opt[1]), v2/abs(v2),  v2/abs(v2) * cis(-θ_opt[1])]
+    return y, ybar -> (NoTangent(), dF_dm * ybar)
+end
+
+
+function target_gate_infildelity_pc(U_target, U)
+    1 - abs_sum_phase_calibrated(tr(U_target'*U))^2 / 16
+end
 
 
 # Current approach
@@ -67,12 +81,12 @@ end
 function optimal_calibration(m, θ_tol=1e-9)
     a1 = abs2(m[1]) + abs2(m[2]); b1 = 2*abs(m[1])*abs(m[2])
     a2 = abs2(m[3]) + abs2(m[4]); b2 = 2*abs(m[3])*abs(m[4])
-    
+
     ϕ1 = mod2pi(angle(m[1]) - angle(m[2]))
     ϕ2 = mod2pi(angle(m[3]) - angle(m[4]))
     ϕ_mean, Δ, α = if abs(ϕ2 - ϕ1) <= π
         (ϕ1 + ϕ2)/2, abs(ϕ2 - ϕ1)/2, ϕ1 < ϕ2 ? 1 : -1
-    else        
+    else
         (2π + ϕ1 + ϕ2)/2, π - abs(ϕ2 - ϕ1)/2, ϕ1 < ϕ2 ? -1 : 1
     end
 
