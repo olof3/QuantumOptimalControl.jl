@@ -26,7 +26,6 @@ function grape_naive(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0, cache=nothi
         mul!(x[k+1], Uk_vec[k], x[k])
     end
 
-
     λ[end] .= Zygote.gradient(Jfinal, x[end])[1]
     #J, J_pullback = ChainRulesCore.rrule(Jfinal, x[end])
     #λ[end] .= J_pullback(1)[2]
@@ -57,14 +56,15 @@ end
 
 
 function setup_grape_cache(A0, x0, u_size)
-    T = eltype(float(x0))
+    T = float(eltype(x0)) # Could be both complex and real
+    Tc = complex(T)
     Nt = u_size[2]
 
     return (x = Matrix{T}[Matrix{T}(undef, size(x0[:,:])...) for k=1:Nt+1],
             λ = Matrix{T}[Matrix{T}(undef, size(x0[:,:])...) for k=1:Nt+1],
             dJdu = Matrix{real(T)}(undef, u_size),
-            Uk_vec = Matrix{T}[Matrix{T}(undef, size(x0,1), size(x0,1)) for k=1:Nt+1],
-            exp_cache = Matrix{eltype(A0)}[similar(A0) for k=1:6],
+            Uk_vec = Matrix{Tc}[Matrix{Tc}(undef, size(x0,1), size(x0,1)) for k=1:Nt+1],
+            exp_cache = Matrix{Tc}[similar(A0) for k=1:6],
             u = Matrix{real(T)}(undef, u_size) # The u used for computaitons, to avoid reevaluating
             )
 end
