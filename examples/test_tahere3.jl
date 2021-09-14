@@ -95,17 +95,21 @@ B = Bpre[:, 4:end-3]
 #cache = QuantumOptimalControl.setup_grape_cache(A0, x0, (2, segment_count))
 ##
 
-μ  = 100e-3
+μ  = 5e-3
 fg! = let
 
-    cache = QuantumOptimalControl.setup_grape_cache(A0, x0, (2, segment_count))
+    cache = QuantumOptimalControl.setup_grape_cache(A0, complex(x0), (2, segment_count))
 
     function (F,dc,c)
         
         L = c -> μ*(norm(c) + norm(diff(c, dims=1)))#1e-7*norm(c)
 
         u = transpose(B*c)
-        x, λ, dJdu = QuantumOptimalControl.grape_naive(A0 * Δt, [A1 * Δt, A2 * Δt], Jfinal, u, x0, cache; dUkdp_order=4)
+
+        x = QuantumOptimalControl.propagate(A0, [A1, A2], u, x0, cache)
+        
+        dJdu = QuantumOptimalControl.grape_sensitivity(A0, [A1, A2], Jfinal, u, x0, cache; dUkdp_order=3)
+        
         #println(dJdu)
         dJdc = B'*transpose(dJdu)
 
@@ -126,7 +130,8 @@ using Optim, Zygote
 
 
 #@time opt_result =  Optim.optimize(Optim.only_fg!(fg!), c0 + 0.02*randn(nsplines,2), f_calls_limit=150)
-@time opt_result =  Optim.optimize(Optim.only_fg!(fg!), 0.01*randn(nsplines,2), f_calls_limit=150)
+c0 = [0.005*ones(nsplines) zeros(nsplines)]
+@time opt_result =  Optim.optimize(Optim.only_fg!(fg!), c0, f_calls_limit=150)
 
 #fg!(1, nothing, c_opt)- 1e-7norm(c_opt)
 
@@ -142,10 +147,10 @@ c_opt = opt_result.minimizer
 
 #x2, λ2, dJdu2 = QuantumOptimalControl.grape_naive(A0 * Δt, [A1 * Δt, A2 * Δt], Jfinal, , x0; dUkdp_order=3)
 
-
+##
 u = transpose(B*c_opt)
-#u = u_mat[:,1:500]
-x, λ, dJdu = QuantumOptimalControl.grape_naive(A0 * Δt, [A1 * Δt, A2 * Δt], Jfinal, u, x0; dUkdp_order=3)
+
+x = QuantumOptimalControl.propagate(A0, [A1, A2], u, x0)
 v = [[x[k][i, 2] for k=1:length(x)] for i=1:9]
 
 using Plots

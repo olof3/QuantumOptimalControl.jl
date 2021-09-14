@@ -1,32 +1,33 @@
-using QuantumOptimalControl
-using Zygote, ChainRulesCore
+using QuantumOptimalControl, DelimitedFiles
 
 include("../examples/cavity_qubit_model.jl")
 
-A0 = -im*1e-9*H0
+examples_dir = dirname(Base.find_package("QuantumOptimalControl"))
+iq_data = DelimitedFiles.readdlm(joinpath(examples_dir, "../examples/cavity_qubit_control.csv"))
+u_data = 1e-9 * [Complex(r...) for r in eachrow(iq_data)] # Going over to GHz
+
+
+A0 = -im*H0
 A1 = -im*(Tc + Tc')/2
 A2 = -im*(im*(Tc - Tc'))/2
 
 u = hcat([[reim(u)...] for u in u_data]...)
 
 x_target = normalize!(kron([1, 0], exp.(1im*theta)))[:,1:1]
-Jfinal = x -> 1 - norm(x_target' * x) # Hmm, what is the gradient
-
-#=function ChainRulesCore.rrule(::typeof(Jfinal), x)
-    Jfinal_internal = x -> 1 - norm(x_target' * x)
-    y = Jfinal_internal(x)
-    return y, xbar -> (NoTangent(), Zygote.gradient(Jfinal_internal, x)[1]::typeof(x) * xbar)
-end=#
+Jfinal = x -> 1 - norm(x_target' * x)
 
 Nt = 100
 
-@time x, λ, dJdu = QuantumOptimalControl.grape_naive(A0, [A1, A2], Jfinal, u[:,1:Nt], x0, ; dUkdp_order=3)
+cache = QuantumOptimalControl.setup_grape_cache(A0, complex(x0), (2, Nt))
+@time x = QuantumOptimalControl.propagate(A0, [A1, A2], u[:,1:Nt], x0, cache)
+@time dJdu = QuantumOptimalControl.grape_sensitivity(A0, [A1, A2], Jfinal, u[:,1:Nt], x0, cache; dUkdp_order=3)
+
+#@btime QuantumOptimalControl.propagate($A0, [$A1, $A2], $u[:,1:$Nt], $x0, $cache)
+#@btime QuantumOptimalControl.grape_sensitivity($A0, [$A1, $A2], $Jfinal, $u[:,1:$Nt], $x0, $cache; dUkdp_order=3)
 
 display(dJdu)
 
 ## DiffEq-based version
-
-#c0real = float(complex2real(I(24)))
 
 cache = QuantumOptimalControl.setup_grape_cache(A0, c2r(x0[:,:]), (2, Nt))
 
@@ -38,16 +39,15 @@ display(dJdu2)
 
 ## Finite diff
 using FiniteDiff
-obj = u -> Jfinal(r2c(propagate_pwc(dxdt, c2r(x0), u, 1.0, cache).u[end]))
+obj = u -> Jfinal(r2c(propagate_pwc(dxdt, c2r(x0[:,:]), u, 1.0, cache).u[end]))
 
 dJdu3 = FiniteDiff.finite_difference_gradient(obj, u[:, 1:100])
 display(dJdu3)
 
-
 # 0.0172903  0.0130303  0.00783313  0.00181776  -0.00486551  …  -0.0908296  -0.0940295   -0.0950277   -0.0939159
 # 0.0475966  0.0520151  0.0557292   0.058564     0.0603646       0.0234938   0.00832458  -0.00675527  -0.0214246
 
-obj = u -> Jfinal(QuantumOptimalControl.grape_naive(A0, [A1, A2], Jfinal, u, x0, ; dUkdp_order=3)[1][end])
+obj = u -> Jfinal(QuantumOptimalControl.propagate(A0, [A1, A2], u[:,1:Nt], x0)[end])
 dJdu4 = FiniteDiff.finite_difference_gradient(obj, u[:, 1:Nt])
 display(dJdu4)
 

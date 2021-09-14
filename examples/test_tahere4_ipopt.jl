@@ -1,5 +1,6 @@
 using QuantumOptimalControl
 using DelimitedFiles
+using Ipopt, Zygote
 
 iq_data = 1e-9*DelimitedFiles.readdlm(joinpath(dirname(Base.find_package("QuantumOptimalControl")), "../examples/pulse_210823.csv"))
 
@@ -9,7 +10,6 @@ u_mat = transpose(iq_data)
 u = copy(transpose(iq_data))
 
 # System parameters
-
 dimq = 3
 dims = 3
 Ntot = dimq * dims
@@ -36,7 +36,9 @@ x0 = 1.0I[1:9, 1:9]
 #x_target_qubit1 = [0 1 0; 1 0 0; 0 0 1]
 #x_target_full = kron(x_target_qubit1, I(3))
 
-Q_css = I(9)[:, [1,2,4,5]] # Should be possible to use just I[:, [1,2,4,5]] in julia 1.8
+qb = QuantumOptimalControl.QuantumBasis([3,3])
+Q_css = qb[:, ["00", "01", "10", "11"]]
+
 x_target = kron([0 1; 1 0], I(2)) # NOT
 #x_target = kron([1 0; 0 1], I(2)) # Id
 
@@ -49,8 +51,8 @@ max_rabi_rate = 2π * 0.060
 
 ##
 
-tgate = 20 # ns
-segment_count = 200
+tgate = 10 # ns
+segment_count = 500
 
 t = LinRange(0, tgate, segment_count + 1)
 
@@ -59,6 +61,9 @@ t = LinRange(0, tgate, segment_count + 1)
 A0 = -im*H0
 A1 = -im*(Tc + Tc')
 A2 = -im*(im*(Tc - Tc'))
+
+A0Δt, A1Δt, A2Δt = A0 * Δt, A1 * Δt, A2 * Δt
+
 
 using BSplines
 using Plots
@@ -76,7 +81,7 @@ B = Bpre[:, 4:end-3]
 
 ##
 
-f, g, f_grad, g_jac = let x0=x0
+f, g, f_grad, g_jac, nu, ng, nx, nc = let x0=x0
 
     nu = 2    
     ng = 2
@@ -90,18 +95,20 @@ f, g, f_grad, g_jac = let x0=x0
         c_prev .= c
         c = reshape(c, nsplines, nu)
         u = transpose(B*c)
-        x, λ, dJdu = QuantumOptimalControl.grape_naive(A0 * Δt, [A1 * Δt, A2 * Δt], Jfinal, u, x0, cache; dUkdp_order=4)
-        
+
+        x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0, cache)                    
+
         Jfinal(x[end])
     end
 
     f_grad = function(c, f_grad_out)
-        # Todo: check cache
         if c_prev != c
-            println("gradient not computed", c[1:2])            
-            f(c) # Use side effects in f
+            println("gradient not computed") # Note sure if IPOPT will ever ask for the gradient before the fcn value
+            f(c) # Use the side effects in f that puts the necessary stuff into cache
         end
-        dJdc = B'*transpose(cache.dJdu)
+        
+        dJdu = QuantumOptimalControl.grape_sensitivity(A0Δt, [A1Δt, A2Δt], Jfinal, cache.u, x0, cache; dUkdp_order=3) # use cache.u
+        dJdc = B'*transpose(dJdu)
 
         f_grad_out .= dJdc[:]
     end
@@ -121,55 +128,15 @@ f, g, f_grad, g_jac = let x0=x0
             cols .= kron(ones(ng), 1:nc)
             rows .= kron(1:ng, ones(nc))    
         else
-            g_jac_tmp = Zygote.jacobian(g_oop, c)[1]            
+            g_jac_tmp = Zygote.jacobian(g_oop, c)[1]::Matrix{Float64}
             g_jac_out .= transpose(g_jac_tmp)[:]
         end        
     end
 
-    f, g, f_grad, g_jac
+    f, g, f_grad, g_jac, nu, ng, nx, nc
 end
+## Could try test_ippot_fcns.jl to make sure that it makes sense
 
-##
-
-using FiniteDiff
-
-nu = 2
-nc = nu * nsplines
-
-c0 = randn(nsplines, 2)
-df = similar(vec(c0))
-
-c = reshape(c0, nsplines, nu)
-u = transpose(B*c)
-cache = QuantumOptimalControl.setup_grape_cache(A0, complex(x0), (2, segment_count))
-x, λ, dJdu = QuantumOptimalControl.grape_naive(A0 * Δt, [A1 * Δt, A2 * Δt], Jfinal, u, x0, cache; dUkdp_order=4)
-vec(B'*transpose(dJdu))
-
-# Compare gradient of f
-f(vec(c0))
-f_grad1 = f_grad(vec(c0), df)
-f_grad2 = FiniteDiff.finite_difference_gradient(f, vec(c0))[:]
-df - f_grad2
-
-gout = zeros(2)
-g(c0, dg)
-
-# Compare jacobian of g
-rows = zeros(Int32, ng * nc)
-cols = zeros(Int32, ng * nc)
-g_jac(c0, :Structure, rows, cols, values)
-
-values = zeros(Float64, ng * nc)
-
-g_jac(c0, :None, rows, cols, values)
-g_jac1 = zeros(ng, nc)
-for k=1:length(rows); g_jac1[rows[k], cols[k]] = values[k]; end
-
-g_jac2 = FiniteDiff.finite_difference_jacobian(c -> g(vec(c), zeros(2)), vec(c0))
-
-g_jac1 - g_jac2
-
-##
 
 c_L = -0.3ones(nc)
 c_U = 0.3ones(nc)
@@ -190,7 +157,6 @@ prob.x = [0.01*ones(nsplines); zeros(nsplines)][:]
 println(Ipopt.ApplicationReturnStatus[status])
 println(prob.x)
 
-
 c_opt = reshape(prob.x, nsplines, nu)
 u = transpose(B*c_opt)
 
@@ -199,38 +165,53 @@ g(vec(c_opt), zeros(2))
 
 println(prob.obj_val) # 17.01401714517915
 
-
 ##
 u_cplx = u[1,:] + im*u[2,:]
 
-Ω = fftfreq(200, 1)
+Ω = fftfreq(length(u_cplx), 1/Δt)
 U = fft(u_cplx)
 
-plot(Ω, abs.(U))
+Ω = -20:0.01:20
+fft_mat = [exp(-im*ω*t) for ω in Ω, t in t[1:end-1]]
+U = fft_mat * u_cplx
 
 
 
-
+plot(Ω[Ω .> 0]/2π, abs.(U[Ω .> 0]), xscale=:log, yscale=:log);
+plot!(-Ω[Ω .< 0]/2π, abs.(U[Ω .< 0]), xscale=:log, yscale=:log, c=:red)
 
 
 ##
 
-#x, λ, dJdu = @btime QuantumOptimalControl.grape_naive(A0 * Δt, [A1 * Δt, A2 * Δt], Jfinal, u, x0; dUkdp_order=3)
+x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)
 
-v = [[x[k][i, 2] for k=1:length(x)] for i=1:9]
+v = [[x[k][i, j] for k=1:length(x)] for i=1:9, j=1:9]
 
 using Plots
 plt1 = plot();
 plot!(plt1, t, abs2.(v[2]))
-for k=1:9
-    plot!(plt1, t, abs2.(v[k]), legend=false)
+
+
+plts = []
+
+comp_basis_inds = [qb.state_dict[s] for s in ["00", "01", "10", "11"]]
+
+for i=0:1, j=0:1
+
+    l = qb.state_dict[string(i, j)]
+
+    plt = plot(legend=(i==j==0), title="From state $(qb.state_labels[l])")
+    for k in comp_basis_inds
+        plot!(plt, t, abs2.(v[k,l]), label=qb.state_labels[k])
+    end
+    push!(plts, plt)
 end
 
-plt2 = plot(t[1:end-1], transpose(u))
-plot!(plt2, [t[1], t[end]], max_rabi_rate*[-1 1; -1 1], c="black")
+plt_u = plot(t[1:end-1], transpose(u))
+plot!(plt_u, [t[1], t[end]], max_rabi_rate*[-1 1; -1 1], c="black", label=nothing)
 
-layout = @layout [a; b]
-plot(plt1, plt2, layout=layout)
+layout = @layout [a b; c d; e]
+plot(plts..., plt_u, layout=layout)
 
 
 

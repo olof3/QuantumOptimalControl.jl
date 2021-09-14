@@ -12,11 +12,10 @@ include("cavity_qubit_model.jl")
 # Optimization parameters
 #max_rabi_rate = 2π* 40e6
 #cutoff_frequency = 2π* 50e6
-tgate = 550e-9 #s
 
 examples_dir = dirname(Base.find_package("QuantumOptimalControl"))
 iq_data = DelimitedFiles.readdlm(joinpath(examples_dir, "../examples/cavity_qubit_control.csv"))
-u_data = 1e-9 * [Complex(r...) for r in eachrow(iq_data)] # Going over to GHz
+u_data = 1e-9 * [Complex(r...) for r in eachrow(iq_data)] # Go over to GHz
 
 ##
 
@@ -28,7 +27,12 @@ xᵣ, xᵢ = [xᵣ...], [xᵢ...]
 u = uᵣ + im*uᵢ
 x = xᵣ + im*xᵢ
 
-Htot = sparse(H0 * 1e-9 + u*Tc/2 + conj(u)*Tc'/2)
+Htot = H0 + u*Tc/2 + conj(u)*Tc'/2
+
+A0 = -im*H0
+A1 = -im*(Tc + Tc')
+A2 = -im*(im*(Tc - Tc'))
+Htot2 = Tc + Tc'
 
 rhs = simplify.(-1im * (Htot * x))
 dxdt = Symbolics.build_function(Symbolics.simplify.(c2r(rhs)), c2r(x), c2r(u), expression=Val{false})[2]
