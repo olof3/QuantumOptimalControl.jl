@@ -30,7 +30,7 @@ function propagate(A0, A::Vector{<:AbstractMatrix}, u, x0, cache=nothing)
 end
 
 # Utilizes the cache from the last call to propagate
-function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0, cache; dUkdp_order=3)
+function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0, cache; dUkdp_order=3, L=nothing)
 
     if u != cache.u
         error("Cache data from other control signal u")
@@ -39,36 +39,39 @@ function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0, cache
 
     T = eltype(x[1])
     Nt = size(u, 2)
+    @assert length(x) == length(λ) == Nt + 1
 
-    λ[end] .= Zygote.gradient(Jfinal, x[end])[1]
+    λ[Nt+1] .= Zygote.gradient(Jfinal, x[Nt+1])[1]
+    if L !== nothing
+        λ[Nt+1] .+= Zygote.gradient(L, x[Nt+1])[1]
+    end
 
     dUkdu = [similar(A0) for k=1:length(A)]
     tmp = [similar(A0) for k=1:4]
-    tmp_prod = [Matrix{T}(undef, size(x0[:,:])) for k=1:2]
+    dxduk = Matrix{T}(undef, size(x0[:,:]))
 
     for k=Nt:-1:1
         mul!(λ[k], Uk_vec[k]', λ[k+1]) # Propage co-states backwards
-        #λ[k] .+= Zygote(g, 
 
-        #λkp1 = reinterpret(ComplexF64, λ[(Nt+2) - (k+1)])
-        #xk = reinterpret(ComplexF64, x[k])
+        if L !== nothing
+            λ[k] .+= Zygote.gradient(L, x[k])[1]
+        end
 
         # Compute derivative of exp(A0 + u1*A1 + u2*A2 + ...) wrt u1 = u[1,k], u2 = u[2,k], ...
         expm_jacobian!(dUkdu, A0, A, u[:,k], tmp, dUkdp_order)
 
         # Compute the sensitivity of J wrt u[1,k], ..
         for j=1:length(A)
-            #dJdu[j, k] = sum(real(λ[k+1]' * dUkdu[j] * x[k]))
-            #dJdu[j, k] = sum(real(conj(λ[k+1]) .* (dUkdu[j] * x[k]))) # Possibly λ' instead, (corresponds to trace/inner product, this seems more readable)
-            mul!(tmp_prod[1], dUkdu[j], x[k]) # dx[k]/du[j]
-            tmp_prod[2] .= real.(conj.(λ[k+1]) .* tmp_prod[1])
-            dJdu[j, k] = sum(tmp_prod[2]) # Possibly λ' instead, (corresponds to trace/inner product, this seems more readable)
+            mul!(dxduk, dUkdu[j], x[k]) # dx[k]/du[j]
+
+            dJdu[j, k] = sum(real(conj(λ_ij) * dxduk_ij) for (λ_ij, dxduk_ij) in zip(λ[k+1], dxduk))
         end
     end
 
     return dJdu
 end
 
+# Old function
 function grape_naive(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0, cache=nothing; dUkdp_order=3)
 
     T = eltype(complex(float(x0)))
@@ -85,7 +88,7 @@ function grape_naive(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0, cache=nothi
 
     Ak = similar(A0)
 
-    # Propage forwards
+    # Propagate forwards
     for k=1:Nt
         Ak .= A0
         for j=1:length(A)

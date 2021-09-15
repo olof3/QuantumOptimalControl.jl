@@ -1,6 +1,7 @@
 using QuantumOptimalControl
 using DelimitedFiles
 using Ipopt, Zygote
+using MKL
 
 iq_data = 1e-9*DelimitedFiles.readdlm(joinpath(dirname(Base.find_package("QuantumOptimalControl")), "../examples/pulse_210823.csv"))
 
@@ -32,7 +33,7 @@ H0 = Hq + Hspectator + Hint
 
 x0 = 1.0I[1:9, 1:9]
 
-# Get the projection on the full 
+# Overly constrained x_target (full state space)
 #x_target_qubit1 = [0 1 0; 1 0 0; 0 0 1]
 #x_target_full = kron(x_target_qubit1, I(3))
 
@@ -52,7 +53,7 @@ max_rabi_rate = 2π * 0.060
 ##
 
 tgate = 10 # ns
-segment_count = 500
+segment_count = 100
 
 t = LinRange(0, tgate, segment_count + 1)
 
@@ -80,8 +81,10 @@ end
 B = Bpre[:, 4:end-3]
 
 ##
+Q_penalty = qb[:, ["20", "21", "22"]]
+L = x -> Δt*0.0002*norm(Q_css' * x * Q_penalty)
 
-f, g, f_grad, g_jac, nu, ng, nx, nc = let x0=x0
+@time f, g, f_grad, g_jac, nu, ng, nx, nc = let x0=x0, L=L
 
     nu = 2    
     ng = 2
@@ -96,9 +99,10 @@ f, g, f_grad, g_jac, nu, ng, nx, nc = let x0=x0
         c = reshape(c, nsplines, nu)
         u = transpose(B*c)
 
-        x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0, cache)                    
+        # xdot = A0*x + (A1*u[1] + A2*u[2])*x
+        x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0, cache)
 
-        Jfinal(x[end])
+        Jfinal(x[end]) + sum(L.(x))
     end
 
     f_grad = function(c, f_grad_out)
@@ -107,7 +111,7 @@ f, g, f_grad, g_jac, nu, ng, nx, nc = let x0=x0
             f(c) # Use the side effects in f that puts the necessary stuff into cache
         end
         
-        dJdu = QuantumOptimalControl.grape_sensitivity(A0Δt, [A1Δt, A2Δt], Jfinal, cache.u, x0, cache; dUkdp_order=3) # use cache.u
+        dJdu = QuantumOptimalControl.grape_sensitivity(A0Δt, [A1Δt, A2Δt], Jfinal, cache.u, x0, cache; dUkdp_order=3, L=L) # use cache.u
         dJdc = B'*transpose(dJdu)
 
         f_grad_out .= dJdc[:]
@@ -138,34 +142,84 @@ end
 ## Could try test_ippot_fcns.jl to make sure that it makes sense
 
 
+
+# Not quite the rabi rate
 c_L = -0.3ones(nc)
 c_U = 0.3ones(nc)
 
 m = 2
 g_L = [-Inf, -Inf]
-g_U = [1, 0.2]
+g_U = [1, 0.4]
+#g_U = [1, 1.0]
 
 @time prob = createProblem(nc, c_L, c_U, ng, g_L, g_U, ng*nc, 0, f, g, f_grad, g_jac)
 
 addOption( prob, "hessian_approximation", "limited-memory");
-addOption( prob, "max_iter", 100);
+addOption( prob, "max_iter", 150);
+addOption( prob, "print_level", 4);
+#addOption( prob, "accept_after_max_steps", 10);
 
-#prob.x = 0.01*randn(nc)
-prob.x = [0.01*ones(nsplines); zeros(nsplines)][:]
-@time status = solveProblem(prob)
+
+
+c0 = [0.01*ones(nsplines); zeros(nsplines)][:]# + 0.001randn(nsplines,2)[:]
+prob.x .= c0 #c_opt[:]
+#@time status = solveProblem(prob)
+@profview status = solveProblem(prob)
 
 println(Ipopt.ApplicationReturnStatus[status])
-println(prob.x)
+#println(prob.x)
 
 c_opt = reshape(prob.x, nsplines, nu)
 u = transpose(B*c_opt)
 
-f(vec(c_opt))
-g(vec(c_opt), zeros(2))
 
+x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)
+
+println([sum(L.(x)), Jfinal(x[end])])
 println(prob.obj_val) # 17.01401714517915
 
+@btime f(vec(c_opt))
+@btime f_grad(vec(c_opt), copy(vec(c_opt)))
+@btime g(vec(c_opt), zeros(2))
+
+
+
+
+x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)
+
+v = [[x[k][i, j] for k=1:length(x)] for i=1:9, j=1:9]
+
+using Plots
+plt1 = plot();
+plot!(plt1, t, abs2.(v[2]))
+
+
+plts = []
+
+#comp_basis_inds = [qb.state_dict[s] for s in ["00", "01", "10", "11"]]
+comp_basis_inds = [qb.state_dict[s] for s in ["20", "21"]]
+
+for i=0:1, j=0:1
+
+    l = qb.state_dict[string(i, j)]
+
+    plt = plot(legend=(i==j==0), title="From state $(qb.state_labels[l])")
+    for k in comp_basis_inds
+        plot!(plt, t, abs2.(v[k,l]), label=qb.state_labels[k])
+    end
+    push!(plts, plt)
+end
+
+plt_u = plot(t[1:end-1], transpose(u), linetype=:steppost, title="Control signal")
+plot!(plt_u, [t[1], t[end]], max_rabi_rate*[-1 1; -1 1], c="black", label=nothing)
+
+layout = @layout [a b; c d; e]
+plot(plts..., plt_u, layout=layout)
+
+
 ##
+
+using AbstractFFTs, FFTW
 u_cplx = u[1,:] + im*u[2,:]
 
 Ω = fftfreq(length(u_cplx), 1/Δt)
@@ -179,39 +233,6 @@ U = fft_mat * u_cplx
 
 plot(Ω[Ω .> 0]/2π, abs.(U[Ω .> 0]), xscale=:log, yscale=:log);
 plot!(-Ω[Ω .< 0]/2π, abs.(U[Ω .< 0]), xscale=:log, yscale=:log, c=:red)
-
-
-##
-
-x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)
-
-v = [[x[k][i, j] for k=1:length(x)] for i=1:9, j=1:9]
-
-using Plots
-plt1 = plot();
-plot!(plt1, t, abs2.(v[2]))
-
-
-plts = []
-
-comp_basis_inds = [qb.state_dict[s] for s in ["00", "01", "10", "11"]]
-
-for i=0:1, j=0:1
-
-    l = qb.state_dict[string(i, j)]
-
-    plt = plot(legend=(i==j==0), title="From state $(qb.state_labels[l])")
-    for k in comp_basis_inds
-        plot!(plt, t, abs2.(v[k,l]), label=qb.state_labels[k])
-    end
-    push!(plts, plt)
-end
-
-plt_u = plot(t[1:end-1], transpose(u))
-plot!(plt_u, [t[1], t[end]], max_rabi_rate*[-1 1; -1 1], c="black", label=nothing)
-
-layout = @layout [a b; c d; e]
-plot(plts..., plt_u, layout=layout)
 
 
 

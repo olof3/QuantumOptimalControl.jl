@@ -53,7 +53,33 @@ display(dJdu4)
 
 
 
+##
 
+Jfinal = x -> 0.0*norm(x)#1 - abs_sum_phase_calibrated(diag(x_target' * Q_css'*x*Q_css))/4
+#Jfinal = x -> 1 - norm(x_target' * x)
+Q_penalty = qb[:, ["20", "21", "22"]]
+
+xtest = randn(ComplexF64,9,9)
+L = x -> norm(Q_css' * x * Q_penalty)
+
+
+L(xtest)
+dLdx = Zygote.gradient(L, xtest)[1][:,5:8]
+dLdx2 = FiniteDiff.finite_difference_gradient(L, xtest)[:,5:8]
+
+#dJfinaldx = Zygote.gradient(Jfinal, x[20])[1]
+##
+
+
+cache = QuantumOptimalControl.setup_grape_cache(A0, complex(x0), (2, Nt))
+@time x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u[:,1:Nt], x0, cache)
+@time dJdu = QuantumOptimalControl.grape_sensitivity(A0Δt, [A1Δt, A2Δt], Jfinal, u[:,1:Nt], x0, cache; dUkdp_order=4, L=L)
+display(dJdu)
+
+#obj = u -> Jfinal(QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)[end])
+obj = u -> sum(L.(QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)))
+dJdu4 = FiniteDiff.finite_difference_gradient(obj, u[:, 1:Nt])
+display(dJdu4)
 
 
 
