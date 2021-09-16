@@ -30,7 +30,7 @@ function propagate(A0, A::Vector{<:AbstractMatrix}, u, x0, cache=nothing)
 end
 
 # Utilizes the cache from the last call to propagate
-function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0, cache; dUkdp_order=3, L=nothing)
+function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, dJfinal_dx, u, x0, cache; dUkdp_order=3, dL_dx=nothing)
 
     if u != cache.u
         error("Cache data from other control signal u")
@@ -41,9 +41,9 @@ function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0, cache
     Nt = size(u, 2)
     @assert length(x) == length(λ) == Nt + 1
 
-    λ[Nt+1] .= Zygote.gradient(Jfinal, x[Nt+1])[1]
-    if L !== nothing
-        λ[Nt+1] .+= Zygote.gradient(L, x[Nt+1])[1]
+    λ[Nt+1] .= dJfinal_dx(x[Nt+1])
+    if dL_dx !== nothing
+        λ[Nt+1] .+= dL_dx(x[Nt+1])
     end
 
     dUkdu = [similar(A0) for k=1:length(A)]
@@ -53,8 +53,8 @@ function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0, cache
     for k=Nt:-1:1
         mul!(λ[k], Uk_vec[k]', λ[k+1]) # Propage co-states backwards
 
-        if L !== nothing
-            λ[k] .+= Zygote.gradient(L, x[k])[1]
+        if dL_dx !== nothing
+            λ[k] .+= dL_dx(x[k])
         end
 
         # Compute derivative of exp(A0 + u1*A1 + u2*A2 + ...) wrt u1 = u[1,k], u2 = u[2,k], ...

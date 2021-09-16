@@ -3,6 +3,8 @@ using DelimitedFiles
 using Ipopt, Zygote
 using MKL
 
+include("models/zz_coupling.jl")
+
 iq_data = 1e-9*DelimitedFiles.readdlm(joinpath(dirname(Base.find_package("QuantumOptimalControl")), "../examples/pulse_210823.csv"))
 
 u = iq_data[:,1] + im*iq_data[:,2]
@@ -10,30 +12,9 @@ u_mat = transpose(iq_data)
 
 u = copy(transpose(iq_data))
 
-# System parameters
-dimq = 3
-dims = 3
-Ntot = dimq * dims
-α_q = 2π * 0.2 
-α_s = 2π * 0.2
-X_dispersive = 2π  * 1e-4
-
-a_q = QuantumOptimalControl.annihilation_op(dimq)
-a_s = QuantumOptimalControl.annihilation_op(dims)
-
-# Specify system Hamiltonians
-Hq = - α_q/2 * kron(a_q'*a_q'*a_q*a_q, I(dims)) # + wq * kron(dot(q',q), eye(dims))
-Hspectator = - α_s/2 * kron(I(dimq), a_s'*a_s'*a_s*a_s) # + ws * kron(eye(dimq), dot(a',a))
-Hint = -X_dispersive * kron(a_q'*a_q, a_s'*a_s)
-
-# Define drive control operators
-Tc = kron(a_q', I(dims))
-
-H0 = Hq + Hspectator + Hint
-
 x0 = 1.0I[1:9, 1:9]
 
-# Overly constrained x_target (full state space)
+# Overly constrained x_target (full state space) (used in Tahere's original Q-CTRL code)
 #x_target_qubit1 = [0 1 0; 1 0 0; 0 0 1]
 #x_target_full = kron(x_target_qubit1, I(3))
 
@@ -43,12 +24,16 @@ Q_css = qb[:, ["00", "01", "10", "11"]]
 x_target = kron([0 1; 1 0], I(2)) # NOT
 #x_target = kron([1 0; 0 1], I(2)) # Id
 
-#Jfinal = x -> 1 - abs(tr(x_target' * Q_css'*x*Q_css))/4 # Hmm, what is the gradient
-Jfinal = x -> 1 - abs_sum_phase_calibrated(diag(x_target' * Q_css'*x*Q_css))/4
+#Jfinal = x -> 1 - abs(tr(Q_css * x_target' * Q_css'*x))/4
+#Jfinal = x -> 1 - abs_sum_phase_calibrated(diag(x_target' * Q_css'*x*Q_css))/4
+#dJfinal_dx = x -> Zygote.gradient(Jfinal, x)[1]
 
-# Optimization parameters
-max_rabi_rate = 2π * 0.060
-#cutoff_freq = 2π* 300 * 1e6
+F = Q_css * x_target' * Q_css' # Can shift the order of the matrices inside trace
+
+Jfinal, dJfinal_dx = QuantumOptimalControl.setup_infidelity(F, 4)
+#Jfinal, dJfinal_dx = QuantumOptimalControl.setup_infidelity_zcalibrated(Q_css*x_target)
+
+#- test1
 
 ##
 
@@ -59,11 +44,11 @@ t = LinRange(0, tgate, segment_count + 1)
 
 Δt = tgate / segment_count
 
-A0 = -im*H0
+#=A0 = -im*H0
 A1 = -im*(Tc + Tc')
 A2 = -im*(im*(Tc - Tc'))
-
-A0Δt, A1Δt, A2Δt = A0 * Δt, A1 * Δt, A2 * Δt
+A0Δt, A1Δt, A2Δt = A0 * Δt, A1 * Δt, A2 * Δt=#
+A0Δt, A1Δt, A2Δt = QuantumOptimalControl.setup_bilinear_matrices(H0, Tc, Δt)
 
 
 using BSplines
@@ -82,9 +67,18 @@ B = Bpre[:, 4:end-3]
 
 ##
 Q_penalty = qb[:, ["20", "21", "22"]]
-L = x -> Δt*0.0002*norm(Q_css' * x * Q_penalty)
+#L2 = x -> Δt*0.0002*norm(Q_penalty' * x * Q_css)
 
-@time f, g, f_grad, g_jac, nu, ng, nx, nc = let x0=x0, L=L
+#L = x -> norm(Q_penalty' * x * Q_css)^2
+#dL_dx = x -> Zygote.gradient(L2, x)[1]
+
+inds_css = qb(["00", "01", "10", "11"])
+inds_penalty = qb(["20", "21", "22"])
+
+μ_state = 1e-9 * Δt/tgate
+L, dL_dx = QuantumOptimalControl.setup_state_penalty(inds_penalty, inds_css, μ_state)
+
+@time f, g, f_grad, g_jac, nu, ng, nx, nc = let x0=x0, L=L    
 
     nu = 2    
     ng = 2
@@ -92,7 +86,7 @@ L = x -> Δt*0.0002*norm(Q_css' * x * Q_penalty)
     nc = nu * nsplines
 
     c_prev = Vector{Float64}(undef, nc)
-    cache = QuantumOptimalControl.setup_grape_cache(A0, complex(x0), (2, segment_count))
+    cache = QuantumOptimalControl.setup_grape_cache(A0Δt, complex(x0), (2, segment_count))
 
     f = function(c)
         c_prev .= c
@@ -111,7 +105,7 @@ L = x -> Δt*0.0002*norm(Q_css' * x * Q_penalty)
             f(c) # Use the side effects in f that puts the necessary stuff into cache
         end
         
-        dJdu = QuantumOptimalControl.grape_sensitivity(A0Δt, [A1Δt, A2Δt], Jfinal, cache.u, x0, cache; dUkdp_order=3, L=L) # use cache.u
+        dJdu = QuantumOptimalControl.grape_sensitivity(A0Δt, [A1Δt, A2Δt], dJfinal_dx, cache.u, x0, cache; dUkdp_order=3, dL_dx=dL_dx) # use cache.u
         dJdc = B'*transpose(dJdu)
 
         f_grad_out .= dJdc[:]
@@ -143,20 +137,21 @@ end
 
 
 
-# Not quite the rabi rate
-c_L = -0.3ones(nc)
-c_U = 0.3ones(nc)
+# Not quite the rabi rate since its on the coefficients
+max_rabi_rate = 2π * 0.060
+c_L = -max_rabi_rate*ones(nc)
+c_U = max_rabi_rate*ones(nc)
 
 m = 2
 g_L = [-Inf, -Inf]
-g_U = [1, 0.4]
+g_U = [2.0, 1]
 #g_U = [1, 1.0]
 
-@time prob = createProblem(nc, c_L, c_U, ng, g_L, g_U, ng*nc, 0, f, g, f_grad, g_jac)
+prob = createProblem(nc, c_L, c_U, ng, g_L, g_U, ng*nc, 0, f, g, f_grad, g_jac)
 
 addOption( prob, "hessian_approximation", "limited-memory");
 addOption( prob, "max_iter", 150);
-addOption( prob, "print_level", 4);
+addOption( prob, "print_level", 5);
 #addOption( prob, "accept_after_max_steps", 10);
 
 
@@ -164,7 +159,7 @@ addOption( prob, "print_level", 4);
 c0 = [0.01*ones(nsplines); zeros(nsplines)][:]# + 0.001randn(nsplines,2)[:]
 prob.x .= c0 #c_opt[:]
 #@time status = solveProblem(prob)
-@profview status = solveProblem(prob)
+@time status = solveProblem(prob)
 
 println(Ipopt.ApplicationReturnStatus[status])
 #println(prob.x)
@@ -173,14 +168,17 @@ c_opt = reshape(prob.x, nsplines, nu)
 u = transpose(B*c_opt)
 
 
-x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)
+cache = QuantumOptimalControl.setup_grape_cache(A0Δt, complex(x0), (2, segment_count))
+x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0, cache)
 
 println([sum(L.(x)), Jfinal(x[end])])
+println([sum(L.(x)) / μ_state, Jfinal(x[end])])
 println(prob.obj_val) # 17.01401714517915
 
-@btime f(vec(c_opt))
-@btime f_grad(vec(c_opt), copy(vec(c_opt)))
-@btime g(vec(c_opt), zeros(2))
+
+@time f(vec(c_opt))
+@time f_grad(vec(c_opt), copy(vec(c_opt)))
+@time g(vec(c_opt), zeros(2))
 
 
 
@@ -197,7 +195,7 @@ plot!(plt1, t, abs2.(v[2]))
 plts = []
 
 #comp_basis_inds = [qb.state_dict[s] for s in ["00", "01", "10", "11"]]
-comp_basis_inds = [qb.state_dict[s] for s in ["20", "21"]]
+comp_basis_inds = qb(["20", "21"])
 
 for i=0:1, j=0:1
 

@@ -7,7 +7,7 @@ using SparseArrays
 
 using QuantumOptimalControl
 
-include("cavity_qubit_model.jl")
+include("models/cavity_qubit_model.jl")
 
 # Optimization parameters
 #max_rabi_rate = 2π* 40e6

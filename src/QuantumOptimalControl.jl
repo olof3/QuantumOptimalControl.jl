@@ -17,6 +17,7 @@ include("utils.jl")
 include("fidelities.jl")
 include("parameterized_pulses.jl")
 include("gradient_computations.jl")
+include("penalty_fcns.jl")
 
 
 

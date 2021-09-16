@@ -46,6 +46,9 @@ function Base.getindex(qb::QuantumBasis, rows::Union{String,Vector{String},Colon
     I[1:qb.Ntot,1:qb.Ntot][row_inds, col_inds]
 end
 
+# Perhaps this doesn't make perfect sense, but for convenience
+(qb::QuantumBasis)(s::String) = qb.state_dict[s]
+(qb::QuantumBasis)(s_vec::Vector{String}) = getindex.(Ref(qb.state_dict), s_vec)
 
 function Base.getproperty(qb::QuantumBasis, d::Symbol)
     if d == :Ntot
@@ -67,6 +70,21 @@ annihilation_ops(qb::QuantumBasis) = annihilation_ops(qb.dims...)
 qubit_hamiltonian(ωr, α, n) = diagm([k*ωr + α*(k-1)*k/2 for k=0:n-1])
 
 
+"""
+    Helper function that given `H0` and `Tc` In
+    `H = H0 + u*Tc + (u*Tc)'`
+    returns
+    `A0Δt = -im*H0*Δt
+    A1Δt = -im*(Tc + Tc')*Δt
+    A2Δt = -im*(im*(Tc - Tc')*Δt`
+
+"""
+function setup_bilinear_matrices(H0, Tc, Δt=1)
+    A0Δt = -im*H0*Δt
+    A1Δt = -im*(Tc + Tc')*Δt
+    A2Δt = -im*(im*(Tc - Tc'))*Δt
+    return A0Δt, A1Δt, A2Δt
+end
 
 
 function compress_states(x, v)

@@ -1,6 +1,6 @@
 using QuantumOptimalControl, DelimitedFiles
 
-include("../examples/cavity_qubit_model.jl")
+include("../examples/models/cavity_qubit.jl")
 
 examples_dir = dirname(Base.find_package("QuantumOptimalControl"))
 iq_data = DelimitedFiles.readdlm(joinpath(examples_dir, "../examples/cavity_qubit_control.csv"))
@@ -14,13 +14,14 @@ A2 = -im*(im*(Tc - Tc'))/2
 u = hcat([[reim(u)...] for u in u_data]...)
 
 x_target = normalize!(kron([1, 0], exp.(1im*theta)))[:,1:1]
-Jfinal = x -> 1 - norm(x_target' * x)
+Jfinal = x -> 1 - abs(tr(x_target' * x))
+dJfinal_dx = x -> Zygote.gradient(Jfinal, x)[1]
 
 Nt = 100
 
 cache = QuantumOptimalControl.setup_grape_cache(A0, complex(x0), (2, Nt))
 @time x = QuantumOptimalControl.propagate(A0, [A1, A2], u[:,1:Nt], x0, cache)
-@time dJdu = QuantumOptimalControl.grape_sensitivity(A0, [A1, A2], Jfinal, u[:,1:Nt], x0, cache; dUkdp_order=3)
+@time dJdu = QuantumOptimalControl.grape_sensitivity(A0, [A1, A2], dJfinal_dx, u[:,1:Nt], x0, cache; dUkdp_order=3)
 
 #@btime QuantumOptimalControl.propagate($A0, [$A1, $A2], $u[:,1:$Nt], $x0, $cache)
 #@btime QuantumOptimalControl.grape_sensitivity($A0, [$A1, $A2], $Jfinal, $u[:,1:$Nt], $x0, $cache; dUkdp_order=3)
@@ -55,17 +56,24 @@ display(dJdu4)
 
 ##
 
+include("../examples/models/zz_coupling.jl")
+A0Δt, A1Δt, A2Δt = QuantumOptimalControl.setup_bilinear_matrices(H0, Tc, Δt)
+
+Nt = 50
+
 Jfinal = x -> 0.0*norm(x)#1 - abs_sum_phase_calibrated(diag(x_target' * Q_css'*x*Q_css))/4
 #Jfinal = x -> 1 - norm(x_target' * x)
+qb = QuantumOptimalControl.QuantumBasis([3,3])
+
+Q_css = qb[:, ["00", "01", "10", "11"]]
 Q_penalty = qb[:, ["20", "21", "22"]]
 
-xtest = randn(ComplexF64,9,9)
-L = x -> norm(Q_css' * x * Q_penalty)
+inds_css = getindex.(Ref(qb.state_dict), ["00", "01", "10", "11"])
+inds_penalty = getindex.(Ref(qb.state_dict), ["20", "21", "22"])
+
+L, dL_dx = QuantumOptimalControl.setup_state_penalty(inds_penalty, inds_css)
 
 
-L(xtest)
-dLdx = Zygote.gradient(L, xtest)[1][:,5:8]
-dLdx2 = FiniteDiff.finite_difference_gradient(L, xtest)[:,5:8]
 
 #dJfinaldx = Zygote.gradient(Jfinal, x[20])[1]
 ##
@@ -73,7 +81,7 @@ dLdx2 = FiniteDiff.finite_difference_gradient(L, xtest)[:,5:8]
 
 cache = QuantumOptimalControl.setup_grape_cache(A0, complex(x0), (2, Nt))
 @time x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u[:,1:Nt], x0, cache)
-@time dJdu = QuantumOptimalControl.grape_sensitivity(A0Δt, [A1Δt, A2Δt], Jfinal, u[:,1:Nt], x0, cache; dUkdp_order=4, L=L)
+@time dJdu = QuantumOptimalControl.grape_sensitivity(A0Δt, [A1Δt, A2Δt], dJfinal_dx, u[:,1:Nt], x0, cache; dUkdp_order=4, dL_dx=dL_dx)
 display(dJdu)
 
 #obj = u -> Jfinal(QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)[end])
