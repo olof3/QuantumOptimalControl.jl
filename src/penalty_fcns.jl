@@ -4,11 +4,11 @@ L = x -> norm(x[inds_penalty, inds_css])^2
 
 function setup_state_penalty(inds_penalty::AbstractVector, inds_css::AbstractVector, μ::Real)
     L = function(x)
-        μ*sum(abs2, x[inds_penalty, inds_css])
+        @views μ*sum(abs2, x[inds_penalty, inds_css])
     end
     dL_dx = function(x)
         dL_dx = zeros(eltype(x), size(x))    
-        dL_dx[inds_penalty, inds_css] .= 2*μ*x[inds_penalty, inds_css]
+        dL_dx[inds_penalty, inds_css] .= 2 .* μ .* x[inds_penalty, inds_css]
         dL_dx
     end
     return L, dL_dx

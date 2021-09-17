@@ -6,10 +6,6 @@ using MKL
 include("models/zz_coupling.jl")
 
 iq_data = 1e-9*DelimitedFiles.readdlm(joinpath(dirname(Base.find_package("QuantumOptimalControl")), "../examples/pulse_210823.csv"))
-
-u = iq_data[:,1] + im*iq_data[:,2]
-u_mat = transpose(iq_data)
-
 u = copy(transpose(iq_data))
 
 x0 = 1.0I[1:9, 1:9]
@@ -32,8 +28,6 @@ F = Q_css * x_target' * Q_css' # Can shift the order of the matrices inside trac
 
 Jfinal, dJfinal_dx = QuantumOptimalControl.setup_infidelity(F, 4)
 #Jfinal, dJfinal_dx = QuantumOptimalControl.setup_infidelity_zcalibrated(Q_css*x_target)
-
-#- test1
 
 ##
 
@@ -96,7 +90,7 @@ L, dL_dx = QuantumOptimalControl.setup_state_penalty(inds_penalty, inds_css, μ_
         # xdot = A0*x + (A1*u[1] + A2*u[2])*x
         x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0, cache)
 
-        Jfinal(x[end]) + sum(L.(x))
+        Jfinal(x[end]) + sum(L, x) # Quite a few allocations here...
     end
 
     f_grad = function(c, f_grad_out)

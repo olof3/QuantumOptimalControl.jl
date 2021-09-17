@@ -11,7 +11,7 @@ function propagate(A0, A::Vector{<:AbstractMatrix}, u, x0, cache=nothing)
     x, λ, dJdu, Uk_vec = cache
     cache.u .= u # To know the u used for the compuations
 
-    x[1] .= copy(x0)
+    x[1] .= x0
 
     # Propage forwards
     Ak = similar(A0) # temporary storage of Ak = A0 + u[1,k]*A[1] + ...
@@ -21,8 +21,10 @@ function propagate(A0, A::Vector{<:AbstractMatrix}, u, x0, cache=nothing)
             Ak .+= u[j,k] .* A[j]
         end
 
-        Uk_vec[k] .= ExponentialUtilities._exp!(Ak, caches=cache.exp_cache)# exp(Ak)
+        Uk_vec[k] .= ExponentialUtilities._exp!(Ak, caches=cache.exp_cache[1])# exp(Ak)
+    end
 
+    for k=1:Nt
         mul!(x[k+1], Uk_vec[k], x[k])
     end
 
@@ -46,17 +48,22 @@ function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, dJfinal_dx, u, x0, c
         λ[Nt+1] .+= dL_dx(x[Nt+1])
     end
 
+    # Propage co-states backwards
+    for k=Nt:-1:1
+        mul!(λ[k], Uk_vec[k]', λ[k+1])
+
+        if dL_dx !== nothing
+            λ[k] .+= dL_dx(x[k])
+        end
+    end
+
+
+    # Compute sensitivity of J with respect to u
     dUkdu = [similar(A0) for k=1:length(A)]
     tmp = [similar(A0) for k=1:4]
     dxduk = Matrix{T}(undef, size(x0[:,:]))
 
     for k=Nt:-1:1
-        mul!(λ[k], Uk_vec[k]', λ[k+1]) # Propage co-states backwards
-
-        if dL_dx !== nothing
-            λ[k] .+= dL_dx(x[k])
-        end
-
         # Compute derivative of exp(A0 + u1*A1 + u2*A2 + ...) wrt u1 = u[1,k], u2 = u[2,k], ...
         expm_jacobian!(dUkdu, A0, A, u[:,k], tmp, dUkdp_order)
 
@@ -71,65 +78,6 @@ function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, dJfinal_dx, u, x0, c
     return dJdu
 end
 
-# Old function
-function grape_naive(A0, A::Vector{<:AbstractMatrix}, Jfinal, u, x0, cache=nothing; dUkdp_order=3)
-
-    T = eltype(complex(float(x0)))
-    Nt = size(u, 2)
-
-    if cache === nothing
-        cache = setup_grape_cache(A0, T.(x0), size(u))
-    end
-
-    x, λ, dJdu, Uk_vec = cache
-    cache.u .= u # To know the u used for the compuations
-
-    x[1] .= copy(x0)
-
-    Ak = similar(A0)
-
-    # Propagate forwards
-    for k=1:Nt
-        Ak .= A0
-        for j=1:length(A)
-            Ak .+= u[j,k] .* A[j]
-        end
-
-        Uk_vec[k] .= ExponentialUtilities._exp!(Ak, caches=cache.exp_cache)# exp(Ak)
-
-        mul!(x[k+1], Uk_vec[k], x[k])
-    end
-
-
-    λ[end] .= Zygote.gradient(Jfinal, x[end])[1]
-    #J, J_pullback = ChainRulesCore.rrule(Jfinal, x[end])
-    #λ[end] .= J_pullback(1)[2]
-
-    dUkdu = [similar(A0) for k=1:length(A)]
-    tmp = [similar(A0) for k=1:4]
-    tmp_prod = [Matrix{T}(undef, size(x0[:,:])) for k=1:2]
-
-    for k=Nt:-1:1
-        mul!(λ[k], Uk_vec[k]', λ[k+1]) # Propage co-states backwards
-
-        λkp1 = reinterpret(ComplexF64, λ[(Nt+2) - (k+1)])
-        xk = reinterpret(ComplexF64, x[k])
-
-        # Compute derivative of exp(A0 + u1*A1 + u2*A2) wrt u1 and u2
-        expm_jacobian!(dUkdu, A0, A, u[:,k], tmp, dUkdp_order)
-        for j=1:length(A)
-            #dJdu[j, k] = sum(real(λ[k+1]' * dUkdu[j] * x[k]))
-            #dJdu[j, k] = sum(real(conj(λ[k+1]) .* (dUkdu[j] * x[k]))) # Possibly λ' instead, (corresponds to trace/inner product, this seems more readable)
-            mul!(tmp_prod[1], dUkdu[j], x[k])
-            tmp_prod[2] .= real.(conj.(λ[k+1]) .* tmp_prod[1])
-            dJdu[j, k] = sum(tmp_prod[2]) # Possibly λ' instead, (corresponds to trace/inner product, this seems more readable)
-        end
-    end
-
-    return x, λ, dJdu
-end
-
-
 
 function setup_grape_cache(A0, x0, u_size)
     T = float(eltype(x0)) # Could be both complex and real
@@ -140,7 +88,7 @@ function setup_grape_cache(A0, x0, u_size)
             λ = Matrix{T}[Matrix{T}(undef, size(x0[:,:])...) for k=1:Nt+1],
             dJdu = Matrix{real(T)}(undef, u_size),
             Uk_vec = Matrix{Tc}[Matrix{Tc}(undef, size(x0,1), size(x0,1)) for k=1:Nt+1],
-            exp_cache = Matrix{Tc}[similar(A0) for k=1:6],
+            exp_cache = Vector{Matrix{Tc}}[Matrix{Tc}[similar(A0) for k=1:6] for l=1:Threads.nthreads()],
             u = Matrix{real(T)}(undef, u_size) # The u used for computaitons, to avoid reevaluating
             )
 end
