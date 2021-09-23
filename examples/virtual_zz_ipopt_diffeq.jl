@@ -53,7 +53,7 @@ function setup_ipopt_callbacks(A0, A_bl, x0, u_prototype, (Jfinal,dJfinal_dx), (
         c = reshape(c, nsplines, nu)
         u = transpose(B*c)        
         
-        dJdu = compute_pwc_gradient(dλdt, Jfinal, u, Δt, A0, A_bl, cache; dUkdp_order=3)
+        dJdu = compute_pwc_gradient(dλdt, dJfinal_dx, u, Δt, A0, A_bl, cache; dUkdp_order=3)
 
         dJdc = B'*transpose(dJdu)
 
@@ -149,7 +149,7 @@ g_L = [-Inf, -Inf]
 g_U = [2.0, 1]
 #g_U = [1, 1.0]
 
-c0 = [0.01*ones(nsplines); zeros(nsplines)][:] + randn(nsplines,2)[:]
+c0 = [0.01*ones(nsplines); zeros(nsplines)][:]# + randn(nsplines,2)[:]
 
 
 prob = createProblem(nc, c_L, c_U, ng, g_L, g_U, ng*nc, 0, f, g, f_grad, g_jac)
@@ -177,11 +177,6 @@ println([sum(L.(x)), Jfinal(x[end])])
 println([sum(L.(x)) / μ_state, Jfinal(x[end])])
 println(prob.obj_val) # 17.01401714517915
 
-
-@time f(vec(c_opt))
-@time f_grad(vec(c_opt), copy(vec(c_opt)))
-@time println(g(vec(c_opt), zeros(2)))
-
 println(g(vec(c_opt), zeros(2)))
 
 x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)
@@ -192,11 +187,9 @@ v = [[x[k][ij_ind] for k=1:length(x)] for ij_ind = CartesianIndices(x[1])]
 
 
 using Plots
-plt1 = plot();
-plot!(plt1, t, abs2.(v[2]))
 
 
-plts = []
+
 
 
 css_labels = ["00", "01", "10", "11"]
@@ -206,6 +199,7 @@ css_dict = Dict(css_labels .=> 1:4)
 comp_basis_inds = [qb.state_dict[s] for s in css_labels]
 #comp_basis_inds = qb(["20", "21"])
 
+plts = []
 for i=0:1, j=0:1
 
     l = css_dict[string(i, j)]
@@ -222,26 +216,3 @@ plot!(plt_u, [t[1], t[end]], max_rabi_rate*[-1 1; -1 1], c="black", label=nothin
 
 layout = @layout [a b; c d; e]
 plot(plts..., plt_u, layout=layout)
-
-##
-
-using AbstractFFTs, FFTW
-u_cplx = u[1,:] + im*u[2,:]
-
-Ω = fftfreq(length(u_cplx), 1/Δt)
-U = fft(u_cplx)
-
-Ω = -20:0.01:20
-fft_mat = [exp(-im*ω*t) for ω in Ω, t in t[1:end-1]]
-U = fft_mat * u_cplx
-
-
-
-plot(Ω[Ω .> 0]/2π, abs.(U[Ω .> 0]), xscale=:log, yscale=:log);
-plot!(-Ω[Ω .< 0]/2π, abs.(U[Ω .< 0]), xscale=:log, yscale=:log, c=:red)
-
-
-
-# Cryptic error message?
-# number of non-zero elemeents in hessian, cannot be negative
-# why does nc need to be specified if c_L and c_U are given?

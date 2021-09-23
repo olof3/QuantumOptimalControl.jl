@@ -1,29 +1,35 @@
+using FiniteDiff
+using Random
+Random.seed!(0)
+
 A0 = 0.05*randn(3,3)
 A1 = 0.05*randn(3,3)
 A2 = 0.05*randn(3,3)
+u = [1.0, 2.0]
 
 dFdp = [similar(A0) for k=1:2]
-tmp = [similar(A0) for k=1:3]
+exp_jac_cache = [similar(A0) for k=1:4]
+
+dFdp_fd = FiniteDiff.finite_difference_jacobian(u -> exp(A0 .+ u[1].*A1 + u[2].*A2)[:], u)
 
 
-u = [1.0, 2.0]
-QuantumOptimalControl.expm_jacobian!(dFdp, A0, [A1, A2], u, tmp, 3)
+QuantumOptimalControl.expm_jacobian!(dFdp, A0, [A1, A2], u, exp_jac_cache, 3)
+dFdp_reshaped = hcat(vec.(dFdp)...)
+@test norm(dFdp_reshaped - dFdp_fd) < 4e-4
 
-fexpm = u -> exp(A0 .+ u[1].*A1 + u[2].*A2)
-
-dFdp1_approx = (fexpm(u + [1e-5, 0]) - fexpm(u)) / 1e-5
-#display(dFdp[1])
-println(norm(dFdp[1] - dFdp1_approx))
-
-dFdp2_approx = (fexpm(u + [0, 1e-5]) - fexpm(u)) / 1e-5
-
-println(norm(dFdp[2] - dFdp2_approx))
+QuantumOptimalControl.expm_jacobian!(dFdp, A0, [A1, A2], u, exp_jac_cache, 4)
+dFdp_reshaped = hcat(vec.(dFdp)...)
+@test norm(dFdp_reshaped - dFdp_fd) < 3e-5
 
 
+# Test with a step Δt of non-unit length
+Δt = 0.25
+dFdp_fd = FiniteDiff.finite_difference_jacobian(u -> exp(Δt*(A0 .+ u[1].*A1 + u[2].*A2))[:], u)
 
+QuantumOptimalControl.expm_jacobian!(dFdp, A0, [A1, A2], u, exp_jac_cache, 3, Δt=Δt)
+dFdp_reshaped = hcat(vec.(dFdp)...)
+@test norm(dFdp_reshaped - dFdp_fd) < 2e-6
 
-
-
-using FiniteDiff
-
-
+QuantumOptimalControl.expm_jacobian!(dFdp, A0, [A1, A2], u, exp_jac_cache, 4, Δt=Δt)
+dFdp_reshaped = hcat(vec.(dFdp)...)
+@test norm(dFdp_reshaped - dFdp_fd) < 3e-8

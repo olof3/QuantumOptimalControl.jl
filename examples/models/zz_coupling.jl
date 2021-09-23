@@ -22,3 +22,6 @@ Hint = -X_dispersive * kron(a_q'*a_q, a_s'*a_s)
 Tc = kron(a_q', I(dims))
 
 H0 = Hq + Hspectator + Hint
+
+
+qb = QuantumOptimalControl.QuantumBasis([dimq,dims])

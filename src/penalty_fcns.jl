@@ -1,7 +1,3 @@
-x = randn(ComplexF64, 9,9)
-L = x -> norm(x[inds_penalty, inds_css])^2
-
-
 function setup_state_penalty(inds_penalty::AbstractVector, inds_css::AbstractVector, μ::Real)
     L = function(x)
         @views μ*sum(abs2, x[inds_penalty, inds_css])
@@ -30,7 +26,7 @@ end
 # Here, U and U_target need to have 4 columns (corresponding to 2 qubits)
 function setup_infidelity_zcalibrated(x_target)
     if size(x_target,2) != 4
-        error("Only works for two qubits, x_target must have four columns") # 1 qubit should also be okay to implement
+        error("Only works for two-qubit gates, x_target must have four columns") # 1 qubit should also be okay to implement
     end
     J = function(x)
         m = diag(x_target'*x)

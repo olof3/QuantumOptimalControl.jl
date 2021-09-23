@@ -57,7 +57,6 @@ function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, dJfinal_dx, u, x0, c
         end
     end
 
-
     # Compute sensitivity of J with respect to u
     dUkdu = [similar(A0) for k=1:length(A)]
     expm_jac_cache = [similar(A0) for k=1:4]
@@ -69,11 +68,8 @@ function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, dJfinal_dx, u, x0, c
 
         # Compute the sensitivity of J wrt u[1,k], ..
         for j=1:length(A)
-            #mul!(dxduk, dUkdu[j], x[k]) # dx[k]/du[j]
-            #dJdu[j, k] = sum(real(conj(λ_ij) * dxduk_ij) for (λ_ij, dxduk_ij) in zip(λ[k+1], dxduk))
-
             # compute sum( λ[k+1] .* (dx[k]/du[j]) ) by doing the sum column wise
-            dJdu[j, k] = sum(real(dot(λi, dUkdu[j], xi)) for (λi, xi) in zip(eachcol(λ[k+1]), eachcol(x[k])))
+            dJdu[j, k] = _compute_u_sensitivity(x[k], λ[k+1], dUkdu[j])
         end
     end
 
@@ -126,25 +122,22 @@ function propagate_pwc(f, x0, u, Δt, cache=nothing; dt=0.1Δt)
         integrator.p[1] .= integrator.p[2][:, k+1]
     end
     pcb=PeriodicCallback(update_u!, Δt, initial_affect=true, save_positions=(true,false))
-
-    # Might need to worry about type of x0 for forward diff
-
     prob = ODEProblem{true}(wrap_pwc(f), x0, (0.0, tgate), callback=pcb)
-    #sol = solve(prob, Tsit5(), x_cache, p=([0.0; 0.0], u), saveat=0:Δt:tgate, adaptive=false, dt=dt)
+
     sol = solve(prob, Tsit5(), x_cache, p=([0.0; 0.0], u), saveat=[0.0,tgate], adaptive=false, dt=dt)
     sol
 end
 
 setup_cache(x0, Nt) = ([similar(x0) for k=1:Nt+1], [similar(x0) for k=1:Nt+1], Matrix{float(real(eltype(x0)))}(undef, 2, Nt))
-function compute_pwc_gradient(dλdt, Jfinal::Function, u, Δt, A0, A, cache; dUkdp_order=2, dt=0.1Δt)
+function compute_pwc_gradient(dλdt, dJfinal_dx::Function, u, Δt, A0, A, cache; dUkdp_order=2, dt=0.1Δt)
 
     x, λ_store, dJdu = cache
 
     tgate = Δt * size(u, 2)
 
     # Co-states
-    λfreal = Zygote.gradient(Jfinal, r2c(x[end]))[1]
-    λf = c2r(λfreal)
+    λf_real = dJfinal_dx(r2c(x[end]))
+    λf = c2r(λf_real)
 
     function update_u_bwd!(integrator)
         k = max(Int(round(integrator.t/Δt)) - 1, 0)
@@ -152,12 +145,13 @@ function compute_pwc_gradient(dλdt, Jfinal::Function, u, Δt, A0, A, cache; dUk
     end
     pcb_adj = PeriodicCallback(update_u_bwd!, -Δt, initial_affect=true, save_positions=(true,false)) # save_positions should maybe be other way around, but really shouldn't matter?
     prob_adj = ODEProblem{true}(wrap_pwc(dλdt), λf, (tgate, 0.0), callback=pcb_adj)
+
     sol_adj = solve(prob_adj, Tsit5(), λ_store, p=([0.0; 0.0], u), saveat=[0.0,tgate], adaptive=false, dt=dt)
 
-    # Compute loss
+    # Compute sensitivity of J wrt the control signal u
     λ = sol_adj.u::typeof(λ_store)
 
-    if dUkdp_order == 0; return sol_adj, dJdu; end
+    if dUkdp_order == 0; return dJdu; end
 
     dUkdu = [similar(A0) for k=1:length(A)]
     expm_jac_cache = [similar(A0) for k=1:4]
@@ -167,7 +161,7 @@ function compute_pwc_gradient(dλdt, Jfinal::Function, u, Δt, A0, A, cache; dUk
         expm_jacobian!(dUkdu, A0, A, u[:,k], expm_jac_cache, dUkdp_order, Δt=Δt)
 
         for j=1:2
-            dJdu[j, k] = sum(real(dot(λi, dUkdu[j], xi)) for (λi, xi) in zip(eachcol(r2c(λ[end-(k+1)+1])), eachcol(r2c(x[k]))))
+            dJdu[j, k] = _compute_u_sensitivity(r2c(x[k]), r2c(λ[end-(k+1)+1]), dUkdu[j])
         end
     end
 
@@ -182,6 +176,11 @@ with respect to p1, p2, ...
 """
 function expm_jacobian!(dFdp, A0, A, p, tmp_data, approx_order=2; Δt=1)
 
+    for j=1:length(A) # The first-order approximation
+        dFdp[j] .= Δt * A[j]
+    end
+    approx_order <= 1 && return
+
     X = tmp_data[1]
     AjX = tmp_data[2]
     XAj = tmp_data[3]
@@ -192,7 +191,6 @@ function expm_jacobian!(dFdp, A0, A, p, tmp_data, approx_order=2; Δt=1)
     end
 
     for j=1:length(A)
-        dFdp[j] .= Δt * A[j]
         if approx_order >= 2
             mul!(AjX, A[j], X)
             mul!(XAj, X, A[j])
@@ -212,4 +210,14 @@ function expm_jacobian!(dFdp, A0, A, p, tmp_data, approx_order=2; Δt=1)
             mul!(dFdp[j], X2, XAj, Δt^4/24, 1)
         end
     end
+end
+
+
+#dJdu[j, k] = sum(real(dot(λi, dUkdu[j], xi)) for (λi, xi) in zip(eachcol(r2c(λ[end-(k+1)+1])), eachcol(r2c(x[k]))))
+function _compute_u_sensitivity(xk, λkp1, dU_duj)
+    dJ_duj = 0
+    @views for l=1:size(xk,2)
+        dJ_duj += real(dot(λkp1[:,l], dU_duj, xk[:,l]))
+    end
+    return dJ_duj
 end
