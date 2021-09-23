@@ -1,4 +1,5 @@
 using QuantumOptimalControl, DelimitedFiles
+using Zygote
 
 include("../examples/models/cavity_qubit.jl")
 
@@ -6,22 +7,32 @@ examples_dir = dirname(Base.find_package("QuantumOptimalControl"))
 iq_data = DelimitedFiles.readdlm(joinpath(examples_dir, "../examples/cavity_qubit_control.csv"))
 u_data = 1e-9 * [Complex(r...) for r in eachrow(iq_data)] # Going over to GHz
 
-
-A0 = -im*H0
-A1 = -im*(Tc + Tc')/2
-A2 = -im*(im*(Tc - Tc'))/2
-
+Δt = 1.0
 u = hcat([[reim(u)...] for u in u_data]...)
 
-x_target = normalize!(kron([1, 0], exp.(1im*theta)))[:,1:1]
+#Δt = 0.5
+#u = kron(u, [1 1])
+
+A0, A1, A2 = QuantumOptimalControl.setup_bilinear_matrices(H0, Tc/2) # Note factor 1/2!
+A0Δt, A1Δt, A2Δt = QuantumOptimalControl.setup_bilinear_matrices(H0, Tc/2, Δt)
+
+#x_target = normalize!(kron([1, 0], exp.(1im*theta)))[:,:]
+
+x0 = [normalize!([ones(N_cavity); zeros(N_cavity)]) normalize!([zeros(N_cavity); ones(N_cavity)])]
+x_target = [normalize!(kron([1,1], exp.(1im*theta))) normalize!([zeros(N_cavity); ones(N_cavity)])]
+
 Jfinal = x -> 1 - abs(tr(x_target' * x))
 dJfinal_dx = x -> Zygote.gradient(Jfinal, x)[1]
 
 Nt = 100
+##
+A0Δt, A1Δt, A2Δt = A0*Δt, A1*Δt, A2*Δt
+cache = QuantumOptimalControl.setup_grape_cache(A0, complex(x0[:,:]), (2, Nt))
 
-cache = QuantumOptimalControl.setup_grape_cache(A0, complex(x0), (2, Nt))
-@time x = QuantumOptimalControl.propagate(A0, [A1, A2], u[:,1:Nt], x0, cache)
-@time dJdu = QuantumOptimalControl.grape_sensitivity(A0, [A1, A2], dJfinal_dx, u[:,1:Nt], x0, cache; dUkdp_order=3)
+x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u[:,1:Nt], x0[:,:], cache)
+println(Jfinal(x[end]))
+
+dJdu = QuantumOptimalControl.grape_sensitivity(A0Δt, [A1Δt, A2Δt], dJfinal_dx, u[:,1:Nt], x0, cache; dUkdp_order=3)
 
 #@btime QuantumOptimalControl.propagate($A0, [$A1, $A2], $u[:,1:$Nt], $x0, $cache)
 #@btime QuantumOptimalControl.grape_sensitivity($A0, [$A1, $A2], $Jfinal, $u[:,1:$Nt], $x0, $cache; dUkdp_order=3)
@@ -30,25 +41,64 @@ display(dJdu)
 
 ## DiffEq-based version
 
-cache = QuantumOptimalControl.setup_grape_cache(A0, c2r(x0[:,:]), (2, Nt))
+include("../examples/models/setup_diffeq_rhs.jl")
+dxdt = setup_dxdt(A0, [A1, A2])
+dλdt = setup_dλdt(A0, [A1, A2])
 
-@time sol = propagate_pwc(dxdt, c2r(x0[:,:]), u[:,1:Nt], 1.0, cache)
-#@time sol_adj, dJdu = QuantumOptimalControl.compute_pwc_gradient(dλdt, Jfinal, u[:,1:Nt], 1.0, A0, A, cache; dUkdp_order=3)
-@time sol_adj, dJdu2 = compute_pwc_gradient(dλdt, Jfinal, u[:,1:Nt], 1.0, A0, [A1, A2], cache; dUkdp_order=3)
+cache2 = QuantumOptimalControl.setup_grape_cache(A0, c2r(x0[:,:]), (2, Nt))
+
+@time sol = propagate_pwc(dxdt, c2r(x0[:,:]), u[:,1:Nt], Δt, cache2)
+#@time sol_adj, dJdu = QuantumOptimalControl.compute_pwc_gradient(dλdt, Jfinal, u[:,1:Nt], Δt, A0, A, cache; dUkdp_order=3)
+@time dJdu2 = compute_pwc_gradient(dλdt, Jfinal, u[:,1:Nt], Δt, A0, [A1, A2], cache2; dUkdp_order=3)
+
+println(Jfinal(r2c(sol.u[end])))
 display(dJdu2)
 
 
-## Finite diff
-using FiniteDiff
-obj = u -> Jfinal(r2c(propagate_pwc(dxdt, c2r(x0[:,:]), u, 1.0, cache).u[end]))
+##
 
-dJdu3 = FiniteDiff.finite_difference_gradient(obj, u[:, 1:100])
+m = 10
+Δt2 = Δt / m
+u2 = kron(u[:,1:Nt], ones(1,m))
+Nt2 = Nt * m
+
+
+#G = setup_pwc_sensitivity_fcn(A0, [A1, A2])
+
+cache = QuantumOptimalControl.setup_grape_cache(A0, c2r(x0[:,:]), (2, Nt2))
+
+sol = propagate_pwc(dxdt, c2r(x0[:,:]), u2, Δt2, cache; dt=0.5Δt2)
+sol_adj, _ = compute_pwc_gradient(dλdt, Jfinal, u2, Δt2, A0, [A1, A2], cache; dUkdp_order=0, dt=0.5Δt2)
+
+println(Jfinal(r2c(sol.u[end])))
+
+
+function compute_sensitivity!(out, A_bl, x, λ, u)
+    for k=1:size(u,2)
+        for j=1:length(A_bl)
+            @views out[j,k] = sum(real(dot(r2c(λ[end-k+1])[:,l], A_bl[j], r2c(x[k])[:,l])) for l=1:size(x[1],2))
+        end
+    end
+    out
+end
+@time compute_sensitivity!(cache.dJdu, [A1, A2], cache.x, cache.λ, u2)
+display(Δt*sum(cache.dJdu[:, k:m:end] for k=1:m) ./ m)
+
+
+## Finite diff
+
+
+
+
+using FiniteDiff
+obj = u -> Jfinal(r2c(propagate_pwc(dxdt, c2r(x0[:,:]), u, Δt).u[end]))
+dJdu3 = FiniteDiff.finite_difference_gradient(obj, u[:, 1:Nt])
 display(dJdu3)
 
 # 0.0172903  0.0130303  0.00783313  0.00181776  -0.00486551  …  -0.0908296  -0.0940295   -0.0950277   -0.0939159
 # 0.0475966  0.0520151  0.0557292   0.058564     0.0603646       0.0234938   0.00832458  -0.00675527  -0.0214246
 
-obj = u -> Jfinal(QuantumOptimalControl.propagate(A0, [A1, A2], u[:,1:Nt], x0)[end])
+obj = u -> Jfinal(QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)[end])
 dJdu4 = FiniteDiff.finite_difference_gradient(obj, u[:, 1:Nt])
 display(dJdu4)
 
@@ -130,7 +180,7 @@ tmp = [similar(1.0A0) for k=1:3]
 QuantumOptimalControl.expm_jacobian!(dUkdu, Δt*A0, [Δt*A1, Δt*A2], u_mat[:,1], tmp, 3)
 =#
 
-    
+
 
 
 #=

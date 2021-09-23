@@ -14,14 +14,14 @@ function propagate(A0, A::Vector{<:AbstractMatrix}, u, x0, cache=nothing)
     x[1] .= x0
 
     # Propage forwards
-    Ak = similar(A0) # temporary storage of Ak = A0 + u[1,k]*A[1] + ...
-    for k=1:Nt
+    Threads.@threads for k=1:Nt
+        Ak = caches=cache.exp_cache[Threads.threadid()][end]  # temporary storage of Ak = A0 + u[1,k]*A[1] + ...
         Ak .= A0
         for j=1:length(A)
             Ak .+= u[j,k] .* A[j]
         end
 
-        Uk_vec[k] .= ExponentialUtilities._exp!(Ak, caches=cache.exp_cache[1])# exp(Ak)
+        Uk_vec[k] .= ExponentialUtilities._exp!(Ak, caches=cache.exp_cache[Threads.threadid()])# exp(Ak)
     end
 
     for k=1:Nt
@@ -35,7 +35,7 @@ end
 function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, dJfinal_dx, u, x0, cache; dUkdp_order=3, dL_dx=nothing)
 
     if u != cache.u
-        error("Cache data from other control signal u")
+        error("Cache data from other control signal u") # Not sure if this will ever happen. Currently captured in the optimizer callbacks. Otherwise, one could call propagate here.
     end
     x, λ, dJdu, Uk_vec = cache
 
@@ -60,35 +60,41 @@ function grape_sensitivity(A0, A::Vector{<:AbstractMatrix}, dJfinal_dx, u, x0, c
 
     # Compute sensitivity of J with respect to u
     dUkdu = [similar(A0) for k=1:length(A)]
-    tmp = [similar(A0) for k=1:4]
-    dxduk = Matrix{T}(undef, size(x0[:,:]))
+    expm_jac_cache = [similar(A0) for k=1:4]
+    #dxduk = similar(x[1])
 
     for k=Nt:-1:1
         # Compute derivative of exp(A0 + u1*A1 + u2*A2 + ...) wrt u1 = u[1,k], u2 = u[2,k], ...
-        expm_jacobian!(dUkdu, A0, A, u[:,k], tmp, dUkdp_order)
+        expm_jacobian!(dUkdu, A0, A, u[:,k], expm_jac_cache, dUkdp_order)
 
         # Compute the sensitivity of J wrt u[1,k], ..
         for j=1:length(A)
-            mul!(dxduk, dUkdu[j], x[k]) # dx[k]/du[j]
+            #mul!(dxduk, dUkdu[j], x[k]) # dx[k]/du[j]
+            #dJdu[j, k] = sum(real(conj(λ_ij) * dxduk_ij) for (λ_ij, dxduk_ij) in zip(λ[k+1], dxduk))
 
-            dJdu[j, k] = sum(real(conj(λ_ij) * dxduk_ij) for (λ_ij, dxduk_ij) in zip(λ[k+1], dxduk))
+            # compute sum( λ[k+1] .* (dx[k]/du[j]) ) by doing the sum column wise
+            dJdu[j, k] = sum(real(dot(λi, dUkdu[j], xi)) for (λi, xi) in zip(eachcol(λ[k+1]), eachcol(x[k])))
         end
     end
 
     return dJdu
 end
 
-
 function setup_grape_cache(A0, x0, u_size)
     T = float(eltype(x0)) # Could be both complex and real
     Tc = complex(T)
     Nt = u_size[2]
 
+    if (eltype(x0) <: Real && size(x0, 1) != 2size(A0, 1)) ||
+       (eltype(x0) <: Complex && size(x0, 1) != size(A0, 1))
+        error("Error when creating cache, A0 and x0 have incompatiable dimensions")
+    end
+
     return (x = Matrix{T}[Matrix{T}(undef, size(x0[:,:])...) for k=1:Nt+1],
             λ = Matrix{T}[Matrix{T}(undef, size(x0[:,:])...) for k=1:Nt+1],
             dJdu = Matrix{real(T)}(undef, u_size),
             Uk_vec = Matrix{Tc}[Matrix{Tc}(undef, size(x0,1), size(x0,1)) for k=1:Nt+1],
-            exp_cache = Vector{Matrix{Tc}}[Matrix{Tc}[similar(A0) for k=1:6] for l=1:Threads.nthreads()],
+            exp_cache = Vector{Matrix{Tc}}[Matrix{Tc}[similar(A0) for k=1:(5+1)] for l=1:Threads.nthreads()], # Should be one longer than needed for _exp!
             u = Matrix{real(T)}(undef, u_size) # The u used for computaitons, to avoid reevaluating
             )
 end
@@ -103,23 +109,29 @@ function wrap_pwc(f)
 end
 
 
-function propagate_pwc(f, x0, u_data, Δt, cache; dt=0.1Δt)
+function propagate_pwc(f, x0, u, Δt, cache=nothing; dt=0.1Δt)
+
+    if cache === nothing
+        n = Int(size(x0,1)/2)
+        cache = setup_grape_cache(zeros(n,n), x0, size(u))
+    end
+
 
     x_cache = cache[1]
 
-    tgate = Δt * size(u_data, 2)
+    tgate = Δt * size(u, 2)
 
     function update_u!(integrator)
         k = Int(round(integrator.t/Δt))
         integrator.p[1] .= integrator.p[2][:, k+1]
     end
-    pcb=PeriodicCallback(update_u!, 1.0, initial_affect=true, save_positions=(true,false))
+    pcb=PeriodicCallback(update_u!, Δt, initial_affect=true, save_positions=(true,false))
 
     # Might need to worry about type of x0 for forward diff
 
     prob = ODEProblem{true}(wrap_pwc(f), x0, (0.0, tgate), callback=pcb)
-    sol = solve(prob, Tsit5(), x_cache, p=([0.0; 0.0], u_data), saveat=0:Δt:tgate, adaptive=false, dt=dt)
-
+    #sol = solve(prob, Tsit5(), x_cache, p=([0.0; 0.0], u), saveat=0:Δt:tgate, adaptive=false, dt=dt)
+    sol = solve(prob, Tsit5(), x_cache, p=([0.0; 0.0], u), saveat=[0.0,tgate], adaptive=false, dt=dt)
     sol
 end
 
@@ -138,29 +150,28 @@ function compute_pwc_gradient(dλdt, Jfinal::Function, u, Δt, A0, A, cache; dUk
         k = max(Int(round(integrator.t/Δt)) - 1, 0)
         integrator.p[1] .= integrator.p[2][:, k+1]
     end
-    pcb_adj = PeriodicCallback(update_u_bwd!, -1.0, initial_affect=true, save_positions=(true,false)) # save_positions should maybe be other way around, but really shouldn't matter?
+    pcb_adj = PeriodicCallback(update_u_bwd!, -Δt, initial_affect=true, save_positions=(true,false)) # save_positions should maybe be other way around, but really shouldn't matter?
     prob_adj = ODEProblem{true}(wrap_pwc(dλdt), λf, (tgate, 0.0), callback=pcb_adj)
-    sol_adj = solve(prob_adj, Tsit5(), λ_store, p=([0.0; 0.0], u), saveat=0:Δt:tgate, adaptive=false, dt=dt)
+    sol_adj = solve(prob_adj, Tsit5(), λ_store, p=([0.0; 0.0], u), saveat=[0.0,tgate], adaptive=false, dt=dt)
 
     # Compute loss
     λ = sol_adj.u::typeof(λ_store)
 
+    if dUkdp_order == 0; return sol_adj, dJdu; end
+
     dUkdu = [similar(A0) for k=1:length(A)]
-    tmp = [similar(A0) for k=1:length(A)+1]
+    expm_jac_cache = [similar(A0) for k=1:4]
 
     Nt = size(u, 2)
     for k=Nt:-1:1
-        λkp1 = reinterpret(ComplexF64, λ[(Nt+2) - (k+1)]) # At time-index k+1
-        xk = reinterpret(ComplexF64, x[k])
+        expm_jacobian!(dUkdu, A0, A, u[:,k], expm_jac_cache, dUkdp_order, Δt=Δt)
 
-        expm_jacobian!(dUkdu, A0, A, u[:,k], tmp, dUkdp_order)
         for j=1:2
-            dJdu[j, k] = sum(real( λkp1' * dUkdu[j] * xk))
+            dJdu[j, k] = sum(real(dot(λi, dUkdu[j], xi)) for (λi, xi) in zip(eachcol(r2c(λ[end-(k+1)+1])), eachcol(r2c(x[k]))))
         end
     end
 
-    #convert(Array, sol), convert(Array, sol_adj)
-    sol_adj, dJdu
+    return dJdu
 end
 
 """
@@ -169,13 +180,11 @@ end
 Modifies `dFdp` in-place to contain the of matrix-valued derivatives of `F = exp(A0 + p[1]*A[1] + p[2]*A[2] + ...)`
 with respect to p1, p2, ...
 """
-function expm_jacobian!(dFdp, A0, A, p, tmp_data, approx_order=2)
+function expm_jacobian!(dFdp, A0, A, p, tmp_data, approx_order=2; Δt=1)
 
     X = tmp_data[1]
-
     AjX = tmp_data[2]
     XAj = tmp_data[3]
-
 
     X .= A0
     for j=1:length(A)
@@ -183,24 +192,24 @@ function expm_jacobian!(dFdp, A0, A, p, tmp_data, approx_order=2)
     end
 
     for j=1:length(A)
-        dFdp[j] .= A[j]
+        dFdp[j] .= Δt * A[j]
         if approx_order >= 2
             mul!(AjX, A[j], X)
             mul!(XAj, X, A[j])
-            dFdp[j] .+= 1/2 .* (AjX .+ XAj)
+            dFdp[j] .+= (Δt^2/2) .* (AjX .+ XAj)
         end
         if approx_order >= 3
-            mul!(dFdp[j], AjX, X, 1/6, 1)
-            mul!(dFdp[j], XAj, X, 1/6, 1)
-            mul!(dFdp[j], X, XAj, 1/6, 1)
+            mul!(dFdp[j], AjX, X, Δt^3/6, 1)
+            mul!(dFdp[j], XAj, X, Δt^3/6, 1)
+            mul!(dFdp[j], X, XAj, Δt^3/6, 1)
         end
         if approx_order >= 4
             X2 = tmp_data[4]
             mul!(X2, X, X)
-            mul!(dFdp[j], AjX, X2, 1/24, 1)
-            mul!(dFdp[j], XAj, X2, 1/24, 1)
-            mul!(dFdp[j], X2, AjX, 1/24, 1)
-            mul!(dFdp[j], X2, XAj, 1/24, 1)
+            mul!(dFdp[j], AjX, X2, Δt^4/24, 1)
+            mul!(dFdp[j], XAj, X2, Δt^4/24, 1)
+            mul!(dFdp[j], X2, AjX, Δt^4/24, 1)
+            mul!(dFdp[j], X2, XAj, Δt^4/24, 1)
         end
     end
 end

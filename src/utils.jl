@@ -1,3 +1,22 @@
+# Column-wise conversion, i.e., not the normal version
+complex2real(A::LinearAlgebra.AbstractVecOrMat{<:Complex{<:AbstractFloat}}) = reinterpret(real(eltype(A)), A)
+complex2real(A::LinearAlgebra.AbstractVecOrMat{<:AbstractFloat}) = complex2real(complex(A))
+real2complex(A::LinearAlgebra.AbstractVecOrMat{<:AbstractFloat}) = reinterpret(complex(eltype(A)), A)
+
+
+
+function complex2real(A::AbstractMatrix{<:Complex})
+    Ar = Matrix{real(eltype(A))}(undef, 2 * size(A,1), size(A,2))
+    Ar[1:2:end, :] .= real.(A)
+    Ar[2:2:end, :] .= imag.(A)
+    Ar
+end
+function real2complex(A::AbstractMatrix{<:Real})
+    if !iseven(size(A,1))
+        error("A must have an even number of rows")
+    end
+    A[1:2:end, :] + im*A[2:2:end, :]    
+end
 # shouldn't need matrix conversions (vectorize vectors first, then apply these)
 function complex2real(A::Union{Number,AbstractVector})
     Ar = Vector{real(eltype(A))}(undef, 2 * length(A))
@@ -5,27 +24,12 @@ function complex2real(A::Union{Number,AbstractVector})
     Ar[2:2:end] .= imag.(A)
     return Ar
 end
-function real2complex(A::AbstractVector)
+function real2complex(A::AbstractVector{<:Real})
     if !iseven(length(A))
         error("Must have even length")
     end
     A[1:2:end] + im*A[2:2:end]
 end
-
-# Column-wise conversion, i.e., not the normal version
-function complex2real(A::AbstractMatrix)
-    Ar = Matrix{real(eltype(A))}(undef, 2 * size(A,1), size(A,2))
-    Ar[1:2:end, :] .= real.(A)
-    Ar[2:2:end, :] .= imag.(A)
-    return Ar
-end
-function real2complex(A::AbstractMatrix)
-    if !iseven(size(A,1))
-        error("A must have an even number of rows")
-    end
-    A[1:2:end, :] + im*A[2:2:end, :]
-end
-
 
 
 struct QuantumBasis
@@ -85,6 +89,8 @@ function setup_bilinear_matrices(H0, Tc, Δt=1)
     A2Δt = -im*(im*(Tc - Tc'))*Δt
     return A0Δt, A1Δt, A2Δt
 end
+
+
 
 
 function compress_states(x, v)

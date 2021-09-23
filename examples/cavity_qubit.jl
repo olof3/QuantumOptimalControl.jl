@@ -7,7 +7,7 @@ using SparseArrays
 
 using QuantumOptimalControl
 
-include("models/cavity_qubit_model.jl")
+include("models/cavity_qubit.jl")
 
 # Optimization parameters
 #max_rabi_rate = 2π* 40e6
@@ -28,11 +28,6 @@ u = uᵣ + im*uᵢ
 x = xᵣ + im*xᵢ
 
 Htot = H0 + u*Tc/2 + conj(u)*Tc'/2
-
-A0 = -im*H0
-A1 = -im*(Tc + Tc')
-A2 = -im*(im*(Tc - Tc'))
-Htot2 = Tc + Tc'
 
 rhs = simplify.(-1im * (Htot * x))
 dxdt = Symbolics.build_function(Symbolics.simplify.(c2r(rhs)), c2r(x), c2r(u), expression=Val{false})[2]
