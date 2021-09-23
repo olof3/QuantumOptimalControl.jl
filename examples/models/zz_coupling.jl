@@ -1,3 +1,5 @@
+using QuantumOptimalControl
+
 # Model used by Tahere to study the impact of ZZ interaction with a spectator qubit when performing single qubit gates
 
 # System parameters

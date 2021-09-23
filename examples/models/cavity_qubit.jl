@@ -1,9 +1,10 @@
 using QuantumOptimalControl
 
+# Ingrid and Marina's model for a cavity--qubit system
+
 # System parameters
 N_qubit = 2 # nuber of transmon levels
 N_cavity = 12 # nuber of cavity levels
-
 
 xi = 2π * (-2.574749e-3) #GHz
 delta = -2.574749e-3 #GHz drive spacing

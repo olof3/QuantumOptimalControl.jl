@@ -14,7 +14,7 @@ include("models/cavity_qubit.jl")
 #cutoff_frequency = 2π* 50e6
 
 examples_dir = dirname(Base.find_package("QuantumOptimalControl"))
-iq_data = DelimitedFiles.readdlm(joinpath(examples_dir, "../examples/cavity_qubit_control.csv"))
+iq_data = DelimitedFiles.readdlm(joinpath(examples_dir, "../examples/cavity_qubit_pulse_marina.csv"))
 u_data = 1e-9 * [Complex(r...) for r in eachrow(iq_data)] # Go over to GHz
 
 ##
@@ -38,6 +38,17 @@ dxdt = Symbolics.build_function(Symbolics.simplify.(c2r(rhs)), c2r(x), c2r(u), e
 
 rhs = simplify.(-1im * (Htot' * λ))
 dλdt = Symbolics.build_function(Symbolics.simplify.(c2r(rhs)), c2r(λ), c2r(u), expression=Val{false})[2]
+
+#=
+A0 = -im*H0
+A1 = -im*(Tc + Tc')/2
+A2 = -im*(im*(Tc - Tc')/2)
+
+dxdt = setup_dxdt(A0, [A1, A2])
+
+dλdt = setup_dxdt(-A0', [-copy(A1'), -copy(A2')])
+=#
+
 
 ##
 
@@ -67,6 +78,7 @@ t = sol.t
 x = hcat([r2c(u) for u in sol.u]...)
 
 abs(real2complex(sol.u[end])' * normalize!(diag(subspace_target)))
+# Should be about 0.999979
 
 # using Plots
 # plt1 = plot(sol.t, abs2.(x[1:11,:]'))
