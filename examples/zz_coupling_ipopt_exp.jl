@@ -17,15 +17,11 @@ Jfinal, dJfinal_dx = QuantumOptimalControl.setup_infidelity(Q_css*css_target, 4)
 #Jfinal, dJfinal_dx = QuantumOptimalControl.setup_infidelity_zcalibrated(Q_css*x_target)
 
 ##
-
 tgate = 10 # ns
 segment_count = 100
 Δt = tgate / segment_count
 
 t = LinRange(0, tgate, segment_count + 1) # t = 0:Δt:tgate
-
-
-
 
 A0Δt, A1Δt, A2Δt = QuantumOptimalControl.setup_bilinear_matrices(H0, Tc, Δt)
 
@@ -47,7 +43,6 @@ B = Bpre[:, 4:end-3]
 #inds_penalty = qb(["20", "21", "22"])
 #μ_state = 1e-9 * Δt/tgate # weighting factors
 #L, dL_dx = QuantumOptimalControl.setup_state_penalty(inds_penalty, inds_css, μ_state)
-
 L, dL_dx = Returns(0), x -> 0*x
 
 
@@ -87,7 +82,6 @@ println("Constrained quantities: $(round.(g(c_opt[:],zeros(2)),sigdigits=3))")
 
 
 # Plot results
-using Plots
 include("plot_fcns.jl")
 
 plot_2qubit_evolution(qb, t, x, u_opt)
@@ -95,15 +89,3 @@ plot_2qubit_evolution(qb, t, x, u_opt)
 ## Plot the guard state population
 plot_2qubit_evolution(qb, t, x, u_opt, to_states=["20", "21", "22"])
 
-
-##
-#=
-iq_data = 1e-9*DelimitedFiles.readdlm(joinpath(dirname(Base.find_package("QuantumOptimalControl")), "../examples/virtual_zz_pulse_tahereh210823.csv"))
-u = copy(transpose(iq_data))
-
-tgate = 20; Δt = tgate/500
-@time A0Δt, A1Δt, A2Δt = QuantumOptimalControl.setup_bilinear_matrices(H0, Tc, Δt)
-@btime x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)
-Jfinal(x[end])
-plot_2qubit_evolution(qb, 0:Δt:tgate, x, u)
-=#

@@ -4,14 +4,10 @@ using Ipopt, Zygote
 using MKL
 
 include("models/zz_coupling.jl")
-
 include("../examples/models/setup_diffeq_rhs.jl")
 
-iq_data = 1e-9*DelimitedFiles.readdlm(joinpath(dirname(Base.find_package("QuantumOptimalControl")), "../examples/virtual_zz_pulse_tahereh210823.csv"))
-u = copy(transpose(iq_data))
 ##
 
-#QuantumOptimalControl
 function setup_ipopt_callbacks(A0, A_bl, x0, u_prototype, (Jfinal,dJfinal_dx), (L,dL_dx), B)
 
     nx = length(x0)    
@@ -136,8 +132,7 @@ inds_penalty = qb(["20", "21", "22"])
 L, dL_dx = QuantumOptimalControl.setup_state_penalty(inds_penalty, inds_css, μ_state)
 L, dL_dx = Returns(0), x -> 0*x
 
-#f2, g2, f_grad2, g_jac2, nu, ng, nx, nc, cache2 = setup_ipopt_callbacks(A0, [A1, A2], x0, u, (Jfinal,dJfinal_dx), (L,dL_dx), B)
-f, g, f_grad, g_jac, nu, ng, nx, nc, cache2 = setup_ipopt_callbacks(A0, [A1, A2], x0, u, (Jfinal,dJfinal_dx), (L,dL_dx), B)
+f, g, f_grad, g_jac, nu, ng, nx, nc, cache2 = setup_ipopt_callbacks(A0, [A1, A2], x0, zeros(2,segment_count), (Jfinal,dJfinal_dx), (L,dL_dx), B)
 
 # Not quite the rabi rate since its on the coefficients
 max_rabi_rate = 2π * 0.060

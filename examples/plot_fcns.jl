@@ -1,3 +1,5 @@
+using Plots
+
 function plot_2qubit_evolution(qb, t, x, u=nothing; to_states=["00", "01", "10", "11"])
     # reshape the trajectory for easier plotting
     x_reshaped = [[x[k][ij_ind] for k=1:length(x)] for ij_ind = CartesianIndices(x[1])]
