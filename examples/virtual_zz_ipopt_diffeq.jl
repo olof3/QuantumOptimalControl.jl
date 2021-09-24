@@ -160,59 +160,23 @@ addOption( prob, "max_iter", 150);
 addOption( prob, "print_level", 3);
 #addOption( prob, "accept_after_max_steps", 10);
 
-
-#@profview status = solveProblem(prob)
 @time status = solveProblem(prob)
 
-println(Ipopt.ApplicationReturnStatus[status])
-#println(prob.x)
-
 c_opt = reshape(prob.x, nsplines, nu)
-u = transpose(B*c_opt)
+u_opt = transpose(B*c_opt)
 
-cache = QuantumOptimalControl.setup_grape_cache(A0Δt, complex(x0), (2, segment_count))
-x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0, cache)
+x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u_opt, x0)
 
-println([sum(L.(x)), Jfinal(x[end])])
-println([sum(L.(x)) / μ_state, Jfinal(x[end])])
-println(prob.obj_val) # 17.01401714517915
-
-println(g(vec(c_opt), zeros(2)))
-
-x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)
+println("IPOPT result: ", round(prob.obj_val, sigdigits=5), " ($(Ipopt.ApplicationReturnStatus[status]))")
+println("Final infidelity: $(round(Jfinal(x[end]),sigdigits=5)), Guard state population: $(sum(L.(x)))")
+println("Constrained quantities: $(round.(g(c_opt[:],zeros(2)),sigdigits=3))")
 
 
-
-v = [[x[k][ij_ind] for k=1:length(x)] for ij_ind = CartesianIndices(x[1])]
-
-
+# Plot results
 using Plots
+include("plot_fcns.jl")
 
+plot_2qubit_evolution(qb, t, x, u_opt)
 
-
-
-
-css_labels = ["00", "01", "10", "11"]
-css_dict = Dict(css_labels .=> 1:4)
-
-
-comp_basis_inds = [qb.state_dict[s] for s in css_labels]
-#comp_basis_inds = qb(["20", "21"])
-
-plts = []
-for i=0:1, j=0:1
-
-    l = css_dict[string(i, j)]
-
-    plt = plot(legend=(i==j==0), title="From state |$(css_labels[l])⟩")
-    for k in comp_basis_inds
-        plot!(plt, t, abs2.(v[k,l]), label=qb.state_labels[k])
-    end
-    push!(plts, plt)
-end
-
-plt_u = plot(t[1:end-1], transpose(u), linetype=:steppost, title="Control signal")
-plot!(plt_u, [t[1], t[end]], max_rabi_rate*[-1 1; -1 1], c="black", label=nothing)
-
-layout = @layout [a b; c d; e]
-plot(plts..., plt_u, layout=layout)
+## Plot the guard state population
+plot_2qubit_evolution(qb, t, x, u_opt, to_states=["20", "21", "22"])

@@ -5,9 +5,6 @@ using BSplines
 include("models/zz_coupling.jl")
 include("ipopt_callbacks_exp.jl")
 
-iq_data = 1e-9*DelimitedFiles.readdlm(joinpath(dirname(Base.find_package("QuantumOptimalControl")), "../examples/virtual_zz_pulse_tahereh210823.csv"))
-u = copy(transpose(iq_data))
-
 Q_css = qb[:, ["00", "01", "10", "11"]] # Orthogonal basis for the computational subspace
 
 x0 = float(Q_css)
@@ -16,7 +13,6 @@ x0 = float(Q_css)
 
 css_target = kron([0 1; 1 0], I(2)) # NOT
 #css_target = kron([1 0; 0 1], I(2)) # Identity
-
 Jfinal, dJfinal_dx = QuantumOptimalControl.setup_infidelity(Q_css*css_target, 4)
 #Jfinal, dJfinal_dx = QuantumOptimalControl.setup_infidelity_zcalibrated(Q_css*x_target)
 
@@ -24,10 +20,12 @@ Jfinal, dJfinal_dx = QuantumOptimalControl.setup_infidelity(Q_css*css_target, 4)
 
 tgate = 10 # ns
 segment_count = 100
-
-t = LinRange(0, tgate, segment_count + 1)
-
 Δt = tgate / segment_count
+
+t = LinRange(0, tgate, segment_count + 1) # t = 0:Δt:tgate
+
+
+
 
 A0Δt, A1Δt, A2Δt = QuantumOptimalControl.setup_bilinear_matrices(H0, Tc, Δt)
 
@@ -52,9 +50,10 @@ B = Bpre[:, 4:end-3]
 
 L, dL_dx = Returns(0), x -> 0*x
 
+
 ## Optimization
 
-f, g, f_grad, g_jac, nu, ng, nx, nc, cache = setup_ipopt_callbacks(A0Δt, A1Δt, A2Δt, x0, u, (Jfinal,dJfinal_dx), (L,dL_dx), B)
+f, g, f_grad, g_jac, nu, ng, nx, nc, cache = setup_ipopt_callbacks(A0Δt, A1Δt, A2Δt, x0, zeros(2,segment_count), (Jfinal,dJfinal_dx), (L,dL_dx), B)
 
 # Not quite the rabi rate since its on the coefficients
 max_rabi_rate = 2π * 0.060
@@ -91,7 +90,20 @@ println("Constrained quantities: $(round.(g(c_opt[:],zeros(2)),sigdigits=3))")
 using Plots
 include("plot_fcns.jl")
 
-plot_2qubit_evolution(qb, x, u)
+plot_2qubit_evolution(qb, t, x, u_opt)
 
 ## Plot the guard state population
-plot_2qubit_evolution(qb, x, u, to_states=["20", "21", "22"])
+plot_2qubit_evolution(qb, t, x, u_opt, to_states=["20", "21", "22"])
+
+
+##
+#=
+iq_data = 1e-9*DelimitedFiles.readdlm(joinpath(dirname(Base.find_package("QuantumOptimalControl")), "../examples/virtual_zz_pulse_tahereh210823.csv"))
+u = copy(transpose(iq_data))
+
+tgate = 20; Δt = tgate/500
+@time A0Δt, A1Δt, A2Δt = QuantumOptimalControl.setup_bilinear_matrices(H0, Tc, Δt)
+@btime x = QuantumOptimalControl.propagate(A0Δt, [A1Δt, A2Δt], u, x0)
+Jfinal(x[end])
+plot_2qubit_evolution(qb, 0:Δt:tgate, x, u)
+=#
