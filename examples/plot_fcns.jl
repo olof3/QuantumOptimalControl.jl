@@ -1,6 +1,6 @@
 using Plots
 
-function plot_2qubit_evolution(qb, t, x, u=nothing; to_states=["00", "01", "10", "11"])
+function plot_2qubit_evolution(qb, t, x, u=nothing; to_states=["00", "01", "10", "11"], max_rabi_rate=nothing)
     # reshape the trajectory for easier plotting
     x_reshaped = [[x[k][ij_ind] for k=1:length(x)] for ij_ind = CartesianIndices(x[1])]
 
@@ -24,7 +24,10 @@ function plot_2qubit_evolution(qb, t, x, u=nothing; to_states=["00", "01", "10",
 
     if !isnothing(u)
         plt_u = plot(t[1:end-1], transpose(u), linetype=:steppost, title="Control signal", label=["I" "Q"])
-        plot!(plt_u, [t[1], t[end]], max_rabi_rate*[-1 1; -1 1], c="black", label=nothing)
+        
+        if max_rabi_rate !== nothing
+            plot!(plt_u, [t[1], t[end]], max_rabi_rate*[-1 1; -1 1], c="black", label=nothing)
+        end
         
         layout = @layout [a b; c d; e]
         plot(plts..., plt_u, layout=layout)

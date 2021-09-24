@@ -21,7 +21,7 @@ function propagate(A0, A::Vector{<:AbstractMatrix}, u, x0, cache=nothing)
             Ak .+= u[j,k] .* A[j]
         end
 
-        Uk_vec[k] .= ExponentialUtilities._exp!(Ak, caches=cache.exp_cache[Threads.threadid()])# exp(Ak)
+        Uk_vec[k] .= ExponentialUtilities.exponential!(Ak, ExpMethodHigham2005(), cache.exp_cache[Threads.threadid()])# exp(Ak)
     end
 
     for k=1:Nt
