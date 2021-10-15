@@ -1,12 +1,12 @@
 function setup_ipopt_callbacks(A0Δt, A1Δt, A2Δt, x0, u_prototype, (Jfinal,dJfinal_dx), (L,dL_dx), B)
-    nu = size(u_prototype,1)
+    nu, nsegments = size(u_prototype)
     ng = 2
     nx = length(x0)
     nsplines = size(B,2)
     nc = nu * nsplines # The number of spline coefficients, i.e., optimization parameters
 
     c_prev = Vector{Float64}(undef, nc) # To check if the f has been evaluated for the provided c
-    cache = QuantumOptimalControl.setup_grape_cache(A0Δt, complex(x0), (2, segment_count))
+    cache = QuantumOptimalControl.setup_grape_cache(A0Δt, complex(x0), (2, nsegments))
 
     f = function(c::Vector{Float64})
         c_prev .= c

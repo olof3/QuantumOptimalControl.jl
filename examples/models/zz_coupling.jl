@@ -2,7 +2,7 @@ using QuantumOptimalControl
 
 # Model used by Tahere to study the impact of ZZ interaction with a spectator qubit when performing single qubit gates
 
-# System parameters
+# System parameters [in GHz]
 dimq = 3
 dims = 3
 Ntot = dimq * dims

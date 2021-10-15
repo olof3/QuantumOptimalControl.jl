@@ -24,13 +24,15 @@ function setup_infidelity(x_target, n=size(x_target, 2))
 end
 
 # Here, U and U_target need to have 4 columns (corresponding to 2 qubits)
-function setup_infidelity_zcalibrated(x_target)
+# The gradient computation assumes that the optimum is found,
+# so should really only allow :optimal, only used for experiments
+function setup_infidelity_zcalibrated(x_target, calibration=:optimal)
     if size(x_target,2) != 4
         error("Only works for two-qubit gates, x_target must have four columns") # 1 qubit should also be okay to implement
     end
     J = function(x)
         m = diag(x_target'*x)
-        1 - abs_sum_phase_calibrated(m)^2/4^2
+        1 - abs_sum_phase_calibrated(m, calibration)^2/4^2
     end    
     dJ_dx = function(x)
         m = diag(x_target'*x)

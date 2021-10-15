@@ -1,41 +1,26 @@
-function infidelity(U_target, Uf, calibration=:lms_phase)
-    if size(U_target) == (4,4)
-        return 1 - abs_trace_phase_calibrated(U_target' * Uf, calibration) / 4
-    else
-        error("Not supported yet")
-    end
-end
-
 abs_trace_phase_calibrated(M, calibration=:optimal) = abs_sum_phase_calibrated(diag(M), calibration)
 
 function abs_sum_phase_calibrated(m, calibration=:optimal)
-    if calibration === :lms_phase
-        # https://en.wikipedia.org/wiki/Mean_of_circular_quantities
-        θ1 = -angle(conj(m[1])*m[2] + conj(m[3])*m[4]) # divide by (abs(m[1]) + abs(m[2]))
-        return abs(m[1] + m[2]*cis(θ1)) + abs(m[3] + m[4]*cis(θ1))
-    end
-    if calibration === :lms_phase2
-        x1, x2 = sqrt(abs(m[1]*m[2])), sqrt(abs(m[3]*m[4]))
-        if x1 < eps() || x2 < eps()
-            return abs(m[1]) + abs(m[2]) + abs(m[3]) + abs(m[4])
-        end
-        θ11 = -angle(conj(m[1])*m[2] / x1 + conj(m[3])*m[4] / x2) # divide by (abs(m[1]) + abs(m[2]))
-        return abs(m[1] + m[2]*cis(θ11)) + abs(m[3] + m[4]*cis(θ11))
-    end
-    if calibration === :lms_phase3
-        x1, x2 = (abs(m[1]) + abs(m[2])), (abs(m[3]) + abs(m[4]))
-        θ11 = -angle(conj(m[1])*m[2] / x1 + conj(m[3])*m[4] / x2) # divide by (abs(m[1]) + abs(m[2]))
-        return abs(m[1] + m[2]*cis(θ11)) + abs(m[3] + m[4]*cis(θ11))
-    end
-
     if calibration === :optimal
         return optimal_calibration(m)[1]
+    elseif calibration === :approx_optimal
+        return optimal_calibration(m, exact_optimum=false)[1]
     elseif calibration === :basic
         return basic_calibration(m)[1]
     elseif calibration === :none
         return abs(sum(m))
+    elseif calibration === :circular_mean1
+        circular_mean_calibration(m, :version1)[1]
+    elseif calibration === :circular_mean2
+        circular_mean_calibration(m, :version2)[1]
+    elseif calibration === :circular_mean3
+        circular_mean_calibration(m, :version3)[1]
+    elseif calibration === :circular_mean4
+        circular_mean_calibration(m, :version4)[1]
     elseif calibration === :grid
         return grid_calibration(m)[1]
+    else
+        error("Unknown calibration algorithm")
     end
 end
 
@@ -61,6 +46,8 @@ function target_gate_infildelity_pc(U_target, U)
 end
 
 
+
+
 # Current approach
 function basic_calibration(m)
     θ0 = angle(m[1])
@@ -68,7 +55,7 @@ function basic_calibration(m)
     return abs(m[1] + m[2]*cis(θ[1]) + m[3]*cis(θ[2]) + m[4]*cis(θ[1] + θ[2])), θ
 end
 
-# To avoid dependening on an optimization package this is only a rather course grid search.
+# To avoid dependening on an optimization package. This is just a rather course grid search.
 function grid_calibration(m)
     J = θ -> abs(m[1] + m[2]*cis(θ)) + abs(m[3] + m[4]*cis(θ))
 
@@ -78,7 +65,8 @@ function grid_calibration(m)
     return J_best, θ_vec[k_best]
 end
 
-function optimal_calibration(m, θ_tol=1e-9)
+
+function optimal_calibration(m, θ_tol=1e-9; exact_optimum=true)
     a1 = abs2(m[1]) + abs2(m[2]); b1 = 2*abs(m[1])*abs(m[2])
     a2 = abs2(m[3]) + abs2(m[4]); b2 = 2*abs(m[3])*abs(m[4])
 
@@ -90,14 +78,32 @@ function optimal_calibration(m, θ_tol=1e-9)
         (2π + ϕ1 + ϕ2)/2, π - abs(ϕ2 - ϕ1)/2, ϕ1 < ϕ2 ? -1 : 1
     end
 
-    J = δ -> sqrt(a1 + b1*cos(δ + Δ)) + sqrt(a2 + b2*cos(δ - Δ)) # δ is deviation from ϕ_mean
-    minusJ, δ_opt = _golden_section_search(δ -> -J(δ), (-Δ, Δ), θ_tol)
+    f = δ -> sqrt(a1 + b1*cos(δ + Δ)) + sqrt(a2 + b2*cos(δ - Δ)) # δ is deviation from ϕ_mean
 
-    θ1_opt = ϕ_mean + α*δ_opt
+    minus_f, δ = if exact_optimum
+        _golden_section_search(δ -> -f(δ), (-Δ, Δ), θ_tol)
+    else
+        δ_opt_approx = _abs_trace_δ_approximation(a1, a2, b1, b2, Δ) # Compute first-order approximation
+        -f(δ_opt_approx), δ_opt_approx
+    end
 
-    θ2_opt = angle(m[1] + m[2]*cis(θ1_opt)) - angle(m[3] + m[4]*cis(θ1_opt))
+    θ2_opt = ϕ_mean + α*δ
+    θ1_opt = angle(m[1] + m[2]*cis(θ2_opt)) - angle(m[3] + m[4]*cis(θ2_opt))
 
-    return -minusJ, [θ1_opt, θ2_opt]
+    return -minus_f, [θ1_opt, θ2_opt]
+end
+
+function _abs_trace_δ_approximation(a1, a2, b1, b2, Δ)
+    s1 = sqrt(a1 + cos(Δ)*b1)
+    s2 = sqrt(a2 + cos(Δ)*b2)
+    if b1 == 0 || s1 == 0
+        δ_opt_approx = Δ
+    elseif b2 == 0 || s2 == 0
+        δ_opt_approx = -Δ
+    else
+        δ_opt_approx = -2sin(Δ)*(b1/s1 - b2/s2)/((b1*(b1 + 2*a1*cos(Δ) + b1*cos(Δ)^2))/s1^3 + (b2*(b2 + 2*a2*cos(Δ) + b2*cos(Δ)^2))/s2^3)
+    end
+    δ_opt_approx
 end
 
 
@@ -134,4 +140,33 @@ function _golden_section_search(f, (x_lower, x_upper), x_tol)
         end
     end
     return new_minimum, new_minimizer
+end
+
+
+function circular_mean_calibration(m, version=:version3)
+    if version === :version1
+        # https://en.wikipedia.org/wiki/Mean_of_circular_quantities
+        θ2 = -angle(conj(m[1])*m[2] + conj(m[3])*m[4]) # divide by (abs(m[1]) + abs(m[2]))
+    elseif version === :version2
+        x1, x2 = sqrt(abs(m[1]*m[2])), sqrt(abs(m[3]*m[4]))
+        if x1 < eps() || x2 < eps()
+            return abs(m[1]) + abs(m[2]) + abs(m[3]) + abs(m[4])
+        end
+        θ2 = -angle(conj(m[1])*m[2] / x1 + conj(m[3])*m[4] / x2)
+    elseif version === :version3
+        x1, x2 = (abs(m[1]) + abs(m[2])), (abs(m[3]) + abs(m[4]))
+        θ2 = -angle(conj(m[1])*m[2] / x1 + conj(m[3])*m[4] / x2)
+    elseif version === :version4
+        x1, x2 = abs(m[1]*m[2]), abs(m[3]*m[4])
+        if x1 < eps() || x2 < eps()
+            return abs(m[1]) + abs(m[2]) + abs(m[3]) + abs(m[4])
+        end
+        θ2 = -angle(conj(m[1])*m[2] / x1 + conj(m[3])*m[4] / x2)
+    else
+        error("Unkown algorithm name")
+    end
+
+    θ1 = angle(m[1] + m[2]*cis(θ2)) - angle(m[3] + m[4]*cis(θ2))
+
+    return abs(m[1] + m[2]*cis(θ2)) + abs(m[3] + m[4]*cis(θ2)), [θ1, θ2]
 end
