@@ -1,3 +1,5 @@
+# The functions return penality functions together with their gradiends (if it is desired to avoid AD tools)
+
 function setup_state_penalty(inds_penalty::AbstractVector, inds_css::AbstractVector, μ::Real)
     L = function(x)
         @views μ*sum(abs2, x[inds_penalty, inds_css])
@@ -13,14 +15,14 @@ end
 
 # Some rows of U_target could be zero, i.e., if full propagator is computed, but only subspace is considered
 function setup_infidelity(x_target, n=size(x_target, 2))    
-    J = function(x)
+    F = function(x)
         1 - abs2(tr(x_target'*x))/n^2
     end    
-    dJ_dx = function(x)
+    dF_dx = function(x)
         Ω = tr(x_target'*x)
         (-2Ω/n^2) * x_target
     end
-    J, dJ_dx
+    F, dF_dx
 end
 
 # Here, U and U_target need to have 4 columns (corresponding to 2 qubits)
@@ -30,17 +32,18 @@ function setup_infidelity_zcalibrated(x_target, calibration=:optimal)
     if size(x_target,2) != 4
         error("Only works for two-qubit gates, x_target must have four columns") # 1 qubit should also be okay to implement
     end
-    J = function(x)
-        m = diag(x_target'*x)
-        1 - abs_sum_phase_calibrated(m, calibration)^2/4^2
+    F = function(x)
+        v = diag(x_target'*x)
+        f = abs_sum_phase_calibrated(v, calibration)
+        1 - f^2/4^2
     end    
-    dJ_dx = function(x)
-        m = diag(x_target'*x)
-        J, pullback = ChainRulesCore.rrule(abs_sum_phase_calibrated, m)
+    dF_dx = function(x)
+        v = diag(x_target'*x)
+        f, pullback = ChainRulesCore.rrule(abs_sum_phase_calibrated, v)
         grad_F = pullback(1)[2]        
-        (-2J/4^2) * x_target * Diagonal(grad_F)
+        (-2f/4^2) * x_target * Diagonal(grad_f)
     end
-    J, dJ_dx
+    F, dF_dx
 end
 
 

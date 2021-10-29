@@ -41,12 +41,6 @@ function ChainRulesCore.rrule(::typeof(abs_sum_phase_calibrated), m)
 end
 
 
-function target_gate_infildelity_pc(U_target, U)
-    1 - abs_sum_phase_calibrated(tr(U_target'*U))^2 / 16
-end
-
-
-
 
 # Current approach
 function basic_calibration(m)
@@ -157,7 +151,7 @@ function circular_mean_calibration(m, version=:version3)
         x1, x2 = (abs(m[1]) + abs(m[2])), (abs(m[3]) + abs(m[4]))
         θ2 = -angle(conj(m[1])*m[2] / x1 + conj(m[3])*m[4] / x2)
     elseif version === :version4
-        x1, x2 = abs(m[1]*m[2]), abs(m[3]*m[4])
+        x1, x2 = sqrt(abs2(m[1]) + abs2(m[2])), sqrt(abs2(m[3]) + abs2(m[4]))
         if x1 < eps() || x2 < eps()
             return abs(m[1]) + abs(m[2]) + abs(m[3]) + abs(m[4])
         end
